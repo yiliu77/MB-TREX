@@ -1,5 +1,6 @@
 import sys
 
+import os
 import h5py
 import numpy as np
 import tqdm
@@ -59,8 +60,12 @@ if __name__ == "__main__":
     all_actions = np.stack(all_actions, axis=0)
 
     print(all_states.shape, all_actions.shape)
+    
+    if not os.path.isdir("saved/{}".format(params["env"]["type"])):
+        os.makedirs("saved/{}".format(params["env"]["type"]))
 
-    with h5py.File("saved/{}/transition_data_45.hdf5".format(params["env"]["type"]), 'w') as f:
+    
+    with h5py.File("saved/{}/transition_data_{}.hdf5".format(params["env"]["type"], params["note"]), 'w') as f:
         f.create_dataset('images', data=all_states)
         f.create_dataset('actions', data=all_actions)
         f.close()

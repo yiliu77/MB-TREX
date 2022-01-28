@@ -81,36 +81,17 @@ class TRexCost:
 
     def plot(self, ep):
         print("Plotting learned cost: ", ep)
-        if self.env_name == 'maze':
-            x_bounds = [-0.3, 0.3]
-            y_bounds = [-0.3, 0.3]
-        elif self.env_name == 'simplepointbot0':
-            x_bounds = [-80, 20]
-            y_bounds = [-10, 10]
-        elif self.env_name == 'simplepointbot1':
-            x_bounds = [-75, 25]
-            y_bounds = [-75, 25]
-        elif self.env_name == 'image_maze':
-            x_bounds = [-0.05, 0.25]
-            y_bounds = [-0.05, 0.25]
-        else:
-            raise NotImplementedError("Plotting unsupported for this envs")
+        x_bounds = [-0.05, 0.25]
+        y_bounds = [-0.05, 0.25]
 
         states = []
-        if self.images:
-            x_pts = 100
-        else:
-            x_pts = 100
-        y_pts = int(
-            x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
+        x_pts = 100
+        y_pts = int(x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
         for x in np.linspace(x_bounds[0], x_bounds[1], y_pts):
             for y in np.linspace(y_bounds[0], y_bounds[1], x_pts):
-                if self.images:
-                    env.reset(pos=(x, y))
-                    obs = process_obs(env._get_obs(images=True))
-                    states.append(obs)
-                else:
-                    states.append([x, y])
+                env.reset(pos=(x, y))
+                obs = process_obs(env._get_obs(images=True))
+                states.append(obs)
 
         num_states = len(states)
         states = self.torchify(np.array(states))
@@ -118,31 +99,10 @@ class TRexCost:
 
         grid = costs.detach().cpu().numpy()
         grid = grid.reshape(y_pts, x_pts)
-        if self.env_name == 'simplepointbot0':
-            plt.gca().add_patch(
-                Rectangle(
-                    (0, 25),
-                    500,
-                    50,
-                    linewidth=1,
-                    edgecolor='r',
-                    facecolor='none'))
-        elif self.env_name == 'simplepointbot1':
-            plt.gca().add_patch(
-                Rectangle(
-                    (45, 65),
-                    10,
-                    20,
-                    linewidth=1,
-                    edgecolor='r',
-                    facecolor='none'))
 
-        if 'maze' in self.env_name:
-            background = cv2.resize(env._get_obs(images=True), (x_pts, y_pts))
-            plt.imshow(background)
-            plt.imshow(grid.T, alpha=0.6)
-        else:
-            plt.imshow(grid.T)
+        background = cv2.resize(env._get_obs(images=True), (x_pts, y_pts))
+        plt.imshow(background)
+        plt.imshow(grid.T, alpha=0.6)
         plt.savefig(
             osp.join(self.logdir, "trex_cost_" + str(ep)),
             bbox_inches='tight')

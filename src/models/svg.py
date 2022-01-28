@@ -1,8 +1,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import tqdm
 import wandb
 from torch import optim
+from torch.optim.lr_scheduler import *
 from torch.utils.data import DataLoader
 
 
@@ -185,9 +187,12 @@ class SVG:
         self.encoder = Encoder(params["channel_dim"], params["action_dim"], params["g_dim"]).to(self.device)
         self.decoder = Decoder(params["g_dim"], params["channel_dim"]).to(self.device)
 
-        self.frame_predictor = LSTM(params["g_dim"] + params["z_dim"], params["g_dim"], params["rnn_size"], params["predictor_rnn_layers"], params["batch_size"]).to(self.device)
-        self.prior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"], params["prior_rnn_layers"], params["batch_size"]).to(self.device)
-        self.posterior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"], params["posterior_rnn_layers"], params["batch_size"]).to(self.device)
+        self.frame_predictor = LSTM(params["g_dim"] + params["z_dim"], params["g_dim"], params["rnn_size"],
+                                    params["predictor_rnn_layers"], params["batch_size"]).to(self.device)
+        self.prior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"], params["prior_rnn_layers"],
+                                  params["batch_size"]).to(self.device)
+        self.posterior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"],
+                                      params["posterior_rnn_layers"], params["batch_size"]).to(self.device)
 
         self.encoder_opt = optim.Adam(self.encoder.parameters(), lr=params["lr"])
         self.decoder_opt = optim.Adam(self.decoder.parameters(), lr=params["lr"])
@@ -195,10 +200,19 @@ class SVG:
         self.prior_opt = optim.Adam(self.prior.parameters(), lr=params["lr"])
         self.posterior_opt = optim.Adam(self.posterior.parameters(), lr=params["lr"])
 
+        self.encoder_scheduler = ExponentialLR(self.encoder_opt, gamma=0.9)
+        self.decoder_scheduler = ExponentialLR(self.decoder_opt, gamma=0.9)
+        self.frame_predictor_scheduler = ExponentialLR(self.frame_predictor_opt, gamma=0.9)
+        self.prior_scheduler = ExponentialLR(self.prior_opt, gamma=0.9)
+        self.posterior_scheduler = ExponentialLR(self.posterior_opt, gamma=0.9)
+
         self.rec_loss = nn.MSELoss()
 
+        self.log_iter = 0
+
     def kl_div(self, mu1, log_var1, mu2, log_var2):
-        KLD = 0.5 * torch.log(log_var2.exp() / log_var1.exp()) + (log_var1.exp() + (mu1 - mu2).pow(2)) / (2 * log_var2.exp()) - 1 / 2
+        KLD = 0.5 * torch.log(log_var2.exp() / log_var1.exp()) + (log_var1.exp() + (mu1 - mu2).pow(2)) / (
+                2 * log_var2.exp()) - 1 / 2
         return torch.mean(KLD)  # TODO
 
     def create_encoding(self, states, actions):
@@ -253,16 +267,22 @@ class SVG:
             kld += self.kl_div(mu, logvar, mu_p, logvar_p)
 
         loss = mse + kld * self.beta
-        wandb.log({"Loss": loss.item(), "MSE": mse.item(), "KLD": kld.item() * self.beta})
+
+        if self.log_iter % 20 == 0:
+            wandb.log({"Loss": loss.item(), "MSE": mse.item(), "KLD": kld.item() * self.beta})
+        self.log_iter += 1
+
         return loss
 
-    def train(self, dataset):
+    def train(self, num_epochs, dataset):
         train_len = int(self.params["train_test_split"] * len(dataset))
         val_len = int(len(dataset) - train_len)
         train_data, val_data = torch.utils.data.random_split(dataset, [train_len, val_len])
 
-        train_loader = DataLoader(train_data, num_workers=self.params["num_cores"], batch_size=self.params["batch_size"], shuffle=True, drop_last=True, pin_memory=True)
-        val_loader = DataLoader(val_data, num_workers=self.params["num_cores"], batch_size=self.params["batch_size"], shuffle=True, drop_last=True, pin_memory=True)
+        train_loader = DataLoader(train_data, num_workers=self.params["num_cores"],
+                                  batch_size=self.params["batch_size"], shuffle=True, drop_last=True)
+        val_loader = DataLoader(val_data, num_workers=self.params["num_cores"], batch_size=self.params["batch_size"],
+                                shuffle=True, drop_last=True)
 
         self.encoder.train()
         self.decoder.train()
@@ -271,31 +291,41 @@ class SVG:
         self.posterior.train()
 
         losses = []
-        for sequences, actions, _, _ in train_loader:
-            sequences = sequences.to(self.device).float()
-            actions = actions.to(self.device).float()
+        for _ in tqdm.tqdm(range(num_epochs)):
+            losses = []
+            for sequences, actions, _, _ in train_loader:
+                sequences = sequences.to(self.device).float()
+                actions = actions.to(self.device).float()
 
-            self.encoder_opt.zero_grad()
-            self.decoder_opt.zero_grad()
-            self.frame_predictor_opt.zero_grad()
-            self.prior_opt.zero_grad()
-            self.posterior_opt.zero_grad()
+                self.encoder_opt.zero_grad()
+                self.decoder_opt.zero_grad()
+                self.frame_predictor_opt.zero_grad()
+                self.prior_opt.zero_grad()
+                self.posterior_opt.zero_grad()
 
-            loss = self.loss(sequences, actions)
-            losses.append(loss.item())
-            loss.backward()
+                loss = self.loss(sequences, actions)
+                losses.append(loss.item())
+                loss.backward()
 
-            self.encoder_opt.step()
-            self.decoder_opt.step()
-            self.frame_predictor_opt.step()
-            self.prior_opt.step()
-            self.posterior_opt.step()
+                self.encoder_opt.step()
+                self.decoder_opt.step()
+                self.frame_predictor_opt.step()
+                self.prior_opt.step()
+                self.posterior_opt.step()
 
-        for _, _, full_sequences, full_actions in val_loader:
-            full_sequences = full_sequences.to("cuda").float()
-            full_actions = full_actions.to("cuda").float()
-            self.validate(full_sequences, full_actions)
-            break
+            for _, _, full_sequences, full_actions in val_loader:
+                full_sequences = full_sequences.to("cuda").float()
+                full_actions = full_actions.to("cuda").float()
+                self.validate(full_sequences, full_actions)
+                break
+
+            self.encoder_scheduler.step()
+            self.decoder_scheduler.step()
+            self.frame_predictor_scheduler.step()
+            self.prior_scheduler.step()
+            self.posterior_scheduler.step()
+
+            wandb.log({"LR": self.encoder_opt.state_dict()['param_groups'][0]['lr']})
 
         return np.mean(losses)
 
@@ -338,11 +368,14 @@ class SVG:
                 gen_seq = gen_seq[:5]
 
                 gen_seq = np.transpose(gen_seq, (0, 2, 1, 3, 4))
-                comb_seqs = np.empty((gen_seq.shape[0] + gt_seqs.shape[0], gen_seq.shape[1], gen_seq.shape[2], gen_seq.shape[3], gen_seq.shape[4]),
+                comb_seqs = np.empty((gen_seq.shape[0] + gt_seqs.shape[0], gen_seq.shape[1], gen_seq.shape[2],
+                                      gen_seq.shape[3], gen_seq.shape[4]),
                                      dtype=gen_seq.dtype)
                 comb_seqs[0::2] = gt_seqs
                 comb_seqs[1::2] = gen_seq
-                comb_seqs = np.reshape(comb_seqs, (comb_seqs.shape[0] * comb_seqs.shape[1], comb_seqs.shape[2] * comb_seqs.shape[3], comb_seqs.shape[4]))
+                comb_seqs = np.reshape(comb_seqs, (
+                    comb_seqs.shape[0] * comb_seqs.shape[1], comb_seqs.shape[2] * comb_seqs.shape[3],
+                    comb_seqs.shape[4]))
 
                 gen_images = wandb.Image(comb_seqs, caption="Sequences")
                 wandb.log({"Sequences": gen_images})
