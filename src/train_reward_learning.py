@@ -22,9 +22,13 @@ if __name__ == "__main__":
 
     env = create_env(params["env"])
     human = MazeHuman(env)
-    query_states, query_actions = human.get_demo(3)
+    demo_states, demo_actions = human.get_demo(2)
+    query_states, query_actions = [], []
+    for demo_state, demo_action in zip(demo_states, demo_actions):
+        query_states.append(demo_state[0:8])
+        query_actions.append(demo_action[0:8])
 
-    transition_params = params["transition_model"]
+    transition_params = params["video_model"]
     dir_name = f"./saved/models/{transition_params['type']}/{transition_params['note']}/"
     video_prediction = SVG(transition_params)
     video_prediction.load(dir_name + "saved_svg")
@@ -62,23 +66,24 @@ if __name__ == "__main__":
         gen_images = wandb.Image(all_states, caption="Sequences")
         wandb.log({"Sequences": gen_images})
         for states, actions in zip(query_states, query_actions):
-            print(len(states), len(actions))
+            print(states.shape, actions.shape)
 
         query_states = np.transpose(np.array(query_states), (0, 1, 3, 4, 2))
         query_actions = np.array(query_actions)
         indices = list(combinations(range(len(query_states)), 2))
         np.random.shuffle(indices)
-        indices = indices[:8]
+        indices = indices[:10]
 
-        paired_states1, paired_states2 = [], []
+        paired_states1, paired_actions1, paired_states2, paired_actions2 = [], [], [], []
         for index in indices:
             paired_states1.append(query_states[index[0]])
             paired_states2.append(query_states[index[1]])
-        print(np.array(paired_states1).shape)
+            paired_actions1.append(query_actions[index[0]])
+            paired_actions2.append(query_actions[index[1]])
+        print(np.array(paired_states1).shape, np.array(paired_actions1).shape)
         labels = human.query_preference(paired_states1, paired_states2)
 
         paired_states1 = np.array(paired_states1)
         paired_states2 = np.array(paired_states2)
         labels = np.array(labels)
-        print(labels.shape, paired_states2.shape, paired_states1.shape)
-        cost_model.train(paired_states1, paired_states2, labels) # TODO fix
+        cost_model.train(paired_states1, paired_actions1, paired_states2, paired_actions2, labels, 10)  # TODO fix

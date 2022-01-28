@@ -29,7 +29,7 @@ video_model:
   last_frame_skip: True
 
   epochs: 25
-  batch_size: 128
+  batch_size: 32 # TODO fix batchsize for video training
   lr: 0.002
   train_test_split: 0.9
   num_cores: 10

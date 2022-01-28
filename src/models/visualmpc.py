@@ -11,8 +11,8 @@ class VisualMPC:
         self.horizon = horizon
         self.env = env
 
-        self.sample_size = 128
-        self.elite_size = 10
+        self.sample_size = 32
+        self.elite_size = 5
 
     def act(self, obs, t=1):
         with torch.no_grad():
@@ -31,7 +31,7 @@ class VisualMPC:
             action_samples = torch.as_tensor(action_samples).to(self.device)
             action_samples = action_samples.permute(1, 0, 2)
 
-            for itr in range(10):  # TODO
+            for itr in range(5):  # TODO
                 curr_states = obs.repeat(self.sample_size, 1, 1, 1)
                 trajectory, _ = self.video_prediction.predict_states(curr_states, action_samples, 8)#self.horizon - t) # TODO check both time and future prediction
 

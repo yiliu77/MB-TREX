@@ -4,7 +4,6 @@ import sys
 import h5py
 import numpy as np
 import torch
-import tqdm
 import yaml
 
 import wandb
@@ -33,8 +32,7 @@ def create_virtual_dataset(folder_path):
             path = os.path.join(folder_path, file_name)
             start = h5py.File(path, 'r')
             if i == 0:
-                layout_images = h5py.VirtualLayout(shape=(dataset_size,) + start["images"].shape[1:],
-                                                   dtype=np.float32)
+                layout_images = h5py.VirtualLayout(shape=(dataset_size,) + start["images"].shape[1:], dtype=np.float32)
                 layout_actions = h5py.VirtualLayout(shape=(dataset_size,) + start["actions"].shape[1:],
                                                     dtype=np.float32)
 

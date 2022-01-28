@@ -44,8 +44,8 @@ class MazeHuman(Human):
                         obs = next_obs
                 pygame.display.update()
 
-            all_traj_obs.append(all_obs)
-            all_traj_actions.append(all_actions)
+            all_traj_obs.append(np.transpose(np.array(all_obs), (0, 3, 1, 2)) / 255)
+            all_traj_actions.append(np.array(all_actions))
 
         pygame.quit()
         return all_traj_obs, all_traj_actions
