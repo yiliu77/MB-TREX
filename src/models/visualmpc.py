@@ -31,9 +31,9 @@ class VisualMPC:
             action_samples = torch.as_tensor(action_samples).to(self.device)
             action_samples = action_samples.permute(1, 0, 2)
 
-            for itr in range(5):  # TODO
+            for itr in range(10):  # TODO
                 curr_states = obs.repeat(self.sample_size, 1, 1, 1)
-                trajectory, _ = self.video_prediction.predict_states(curr_states, action_samples, 8)#self.horizon - t) # TODO check both time and future prediction
+                trajectory, _ = self.video_prediction.predict_states(curr_states, action_samples, 8)  # self.horizon - t) # TODO check both time and future prediction
 
                 reshaped_trajectory = trajectory[:8].reshape(-1, trajectory.shape[2], trajectory.shape[3], trajectory.shape[4])
                 reshaped_actions = action_samples[:8].reshape(-1, action_samples.shape[2])

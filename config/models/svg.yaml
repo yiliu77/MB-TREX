@@ -3,7 +3,7 @@ env:
   horizon: 50
   use_images: True
   dense_rewards: True
-  max_force: 0.3
+  max_force: 0.5
   goal_thresh: 0.03
 
 video_model:
@@ -36,4 +36,5 @@ video_model:
 
 cost_model:
   hidden_size: 64
+  cost_reg: 0.0
   lr: 0.002

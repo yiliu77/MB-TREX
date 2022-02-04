@@ -1,5 +1,8 @@
 import os
 
+import torch
+from matplotlib import pyplot as plt
+import cv2
 import numpy as np
 from gym import Env
 from gym import utils
@@ -34,8 +37,8 @@ class Maze(Env, utils.EzPickle):
         self.gain = 10
 
         self.goal = np.zeros((2,))
-        self.goal[0] = 0.25
-        self.goal[1] = -0.25
+        self.goal[0] = 0.3
+        self.goal[1] = -0.3
 
     def get_goal(self):
         self.sim.data.qpos[0] = self.goal[0]
@@ -74,7 +77,9 @@ class Maze(Env, utils.EzPickle):
 
     def _get_obs(self):
         if self.use_images:
-            return self.sim.render(64, 64, camera_name="cam0")
+            rendered_img = self.sim.render(64, 64, camera_name="cam0")
+            rendered_img[rendered_img[:, :, 0] > 200] = [255, 0, 0]
+            return rendered_img
         # joint poisitions and velocities
         state = np.concatenate([self.sim.data.qpos[:].copy(), self.sim.data.qvel[:].copy()])
         return state[:2]  # State is just (x, y) now
@@ -116,3 +121,32 @@ class Maze(Env, utils.EzPickle):
 
     def render(self, mode="human"):
         raise NotImplementedError
+
+    def visualize_rewards(self, filename, cost_model):
+        action = self.action_space.sample()
+        x_bounds = [-0.25, 0.25]
+        y_bounds = [-0.25, 0.25]
+
+        states, actions = [], []
+        x_pts = 60
+        y_pts = int(x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
+        for x in np.linspace(x_bounds[0], x_bounds[1], y_pts):
+            for y in np.linspace(y_bounds[0], y_bounds[1], x_pts):
+                obs = self.reset(pos=(x, y))
+                states.append(obs)
+                actions.append(action)
+
+        states = torch.as_tensor(np.array(states)).float().to("cuda")
+        states = torch.permute(states, (0, 3, 1, 2))
+        actions = torch.as_tensor(np.array(actions)).float().to("cuda")
+        costs = cost_model.get_value(states, actions)
+
+        grid = costs.detach().cpu().numpy()
+        grid = grid.reshape(y_pts, x_pts)
+
+        background = cv2.resize(self.reset(), (x_pts, y_pts))
+        plt.imshow(background)
+        plt.imshow(grid.T, alpha=0.6)
+        plt.colorbar()
+        plt.savefig(filename, bbox_inches='tight')
+        plt.close()

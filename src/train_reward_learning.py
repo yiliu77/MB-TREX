@@ -28,23 +28,36 @@ if __name__ == "__main__":
         query_states.append(demo_state[0:8])
         query_actions.append(demo_action[0:8])
 
+    for _ in range(10):
+        obs = env.reset()
+        action = env.action_space.sample()
+        random_states, random_actions = [], []
+        for _ in range(8):
+            next_obs, _, _, _ = env.step(action)
+            obs = next_obs
+            random_states.append(np.transpose(obs, (2, 0, 1)) / 255)
+            random_actions.append(action)
+        query_states.append(np.array(random_states))
+        query_actions.append(np.array(random_actions))
+
     transition_params = params["video_model"]
     dir_name = f"./saved/models/{transition_params['type']}/{transition_params['note']}/"
     video_prediction = SVG(transition_params)
     video_prediction.load(dir_name + "saved_svg")
-
-    # TODO: demonstrations using GT
-    # TODO: a star to different points
-    # TODO: ensemble with different ensemble members
+    video_prediction.eval()
 
     # TODO: intrinsic motivation using RND
-    # TODO: information gain metric for selecting queries instead of random selection / instead of using learned reward add exploration bonus as infogain
     # TODO: down the line skill discovery methods
 
+    # TODO: change from mean of ensemble to individual ensemble to improve diversity of CEM trajectories
+    # TODO: rnd for video learning
+    # TODO: add more metrics: measure variance of trex ensemble members, measure GT reward over time
+
     cost_model = TRexCost(video_prediction.create_encoding, transition_params["g_dim"], params["cost_model"])
+    env.visualize_rewards("saved/models/TREX/initial.png", cost_model)
 
     agent_model = VisualMPC(video_prediction, cost_model.get_value, params["env"]["horizon"], env)
-    while True:
+    for iteration in range(100):
         all_states = []
         state = env.reset()
         t = 1
@@ -54,8 +67,13 @@ if __name__ == "__main__":
             next_state, reward, done, info = env.step(action)
             print(action, t, reward)
 
-            query_states.append(generated_traj)
-            query_actions.append(generated_actions)
+            # from matplotlib import pyplot as plt
+            # plt.imshow(state)
+            # plt.show()
+
+            if t % 4 == 0:
+                query_states.append(generated_traj)
+                query_actions.append(generated_actions)
             all_states.append(state)
             state = next_state
             t += 1
@@ -68,22 +86,22 @@ if __name__ == "__main__":
         for states, actions in zip(query_states, query_actions):
             print(states.shape, actions.shape)
 
-        query_states = np.transpose(np.array(query_states), (0, 1, 3, 4, 2))
-        query_actions = np.array(query_actions)
-        indices = list(combinations(range(len(query_states)), 2))
+        query_states_np = np.transpose(np.array(query_states), (0, 1, 3, 4, 2))
+        query_actions_np = np.array(query_actions)
+        indices = list(combinations(range(len(query_states_np)), 2))
         np.random.shuffle(indices)
         indices = indices[:10]
 
         paired_states1, paired_actions1, paired_states2, paired_actions2 = [], [], [], []
         for index in indices:
-            paired_states1.append(query_states[index[0]])
-            paired_states2.append(query_states[index[1]])
-            paired_actions1.append(query_actions[index[0]])
-            paired_actions2.append(query_actions[index[1]])
-        print(np.array(paired_states1).shape, np.array(paired_actions1).shape)
+            paired_states1.append(query_states_np[index[0]])
+            paired_states2.append(query_states_np[index[1]])
+            paired_actions1.append(query_actions_np[index[0]])
+            paired_actions2.append(query_actions_np[index[1]])
         labels = human.query_preference(paired_states1, paired_states2)
 
         paired_states1 = np.array(paired_states1)
         paired_states2 = np.array(paired_states2)
         labels = np.array(labels)
         cost_model.train(paired_states1, paired_actions1, paired_states2, paired_actions2, labels, 10)  # TODO fix
+        env.visualize_rewards("saved/models/TREX/image{}.png".format(iteration), cost_model)

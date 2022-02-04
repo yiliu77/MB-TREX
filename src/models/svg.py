@@ -193,6 +193,7 @@ class SVG:
                                   params["batch_size"]).to(self.device)
         self.posterior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"],
                                       params["posterior_rnn_layers"], params["batch_size"]).to(self.device)
+        self.batch_size = params["batch_size"]
 
         self.encoder_opt = optim.Adam(self.encoder.parameters(), lr=params["lr"])
         self.decoder_opt = optim.Adam(self.decoder.parameters(), lr=params["lr"])
@@ -216,7 +217,8 @@ class SVG:
         return torch.mean(KLD)  # TODO
 
     def create_encoding(self, states, actions):
-        return self.encoder(states, actions)[0]
+        with torch.no_grad():
+            return self.encoder(states, actions)[0].detach()
 
     def predict_states(self, start_state, actions, horizon):
         with torch.no_grad():
@@ -380,6 +382,13 @@ class SVG:
                 gen_images = wandb.Image(comb_seqs, caption="Sequences")
                 wandb.log({"Sequences": gen_images})
 
+    def eval(self):
+        self.encoder.eval()
+        self.decoder.eval()
+        self.frame_predictor.eval()
+        self.prior.eval()
+        self.posterior.eval()
+
     def load(self, directory):
         checkpoint = torch.load(directory)
         self.encoder = checkpoint["encoder"]
@@ -387,6 +396,9 @@ class SVG:
         self.frame_predictor = checkpoint["frame_predictor"]
         self.prior = checkpoint["prior"]
         self.posterior = checkpoint["posterior"]
+        self.frame_predictor.batch_size = self.batch_size
+        self.prior.batch_size = self.batch_size
+        self.posterior.batch_size = self.batch_size
 
     def save(self, directory):
         torch.save({

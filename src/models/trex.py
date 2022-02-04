@@ -35,6 +35,13 @@ class CostNetwork(nn.Module):
         r = self.fc4(x)
         return torch.abs(r)
 
+    def get_cost(self, states):
+        x = F.relu(self.fc1(states))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        r = self.fc4(x)
+        return r
+
     def forward(self, traj_i, traj_j):
         cum_r_i, abs_r_i = self.cum_return(traj_i)
         cum_r_j, abs_r_j = self.cum_return(traj_j)
@@ -55,11 +62,15 @@ class TRexCost:
 
         for epoch in range(num_epochs):
             for i in range(len(all_states1)):
-                states1, actions1, states2, actions2 = all_states1[i], all_actions1[i], all_states2[i], all_actions2[i]
-                states1 = torch.as_tensor(np.array(states1)).to(self.device)
-                actions1 = torch.as_tensor(np.array(actions1)).to(self.device)
-                states2 = torch.as_tensor(np.array(states2)).to(self.device)
-                actions2 = torch.as_tensor(np.array(actions2)).to(self.device)
+                states1, actions1, states2, actions2, label = all_states1[i], all_actions1[i], all_states2[i], all_actions2[i], all_labels[i]
+                states1 = torch.as_tensor(np.array(states1)).float().to(self.device)
+                actions1 = torch.as_tensor(np.array(actions1)).float().to(self.device)
+                states2 = torch.as_tensor(np.array(states2)).float().to(self.device)
+                actions2 = torch.as_tensor(np.array(actions2)).float().to(self.device)
+                label = torch.as_tensor(np.array(label)).long().to(self.device)
+
+                states1 = torch.permute(states1, (0, 3, 1, 2))
+                states2 = torch.permute(states2, (0, 3, 1, 2))
 
                 encodings1 = self.encoder(states1, actions1)
                 encodings2 = self.encoder(states2, actions2)
@@ -67,7 +78,7 @@ class TRexCost:
                 outputs, abs_costs = self.cost_model(encodings1, encodings2)
                 outputs = outputs.unsqueeze(0)
 
-                train_loss = loss_fn(outputs, all_labels[i]) + self.params["cost_reg"] * abs_costs
+                train_loss = loss_fn(outputs, 1 - label.unsqueeze(0)) + self.params["cost_reg"] * abs_costs
 
                 self.cost_opt.zero_grad()
                 train_loss.backward()
@@ -75,34 +86,6 @@ class TRexCost:
 
     def get_value(self, states, actions):
         with torch.no_grad():
-            enc_states = self.encoder(states, actions)
-            abs_costs = self.cost_model.get_abs_costs(enc_states)
-        return abs_costs
-
-    def plot(self, ep):
-        print("Plotting learned cost: ", ep)
-        x_bounds = [-0.05, 0.25]
-        y_bounds = [-0.05, 0.25]
-
-        states = []
-        x_pts = 100
-        y_pts = int(x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
-        for x in np.linspace(x_bounds[0], x_bounds[1], y_pts):
-            for y in np.linspace(y_bounds[0], y_bounds[1], x_pts):
-                env.reset(pos=(x, y))
-                obs = process_obs(env._get_obs(images=True))
-                states.append(obs)
-
-        num_states = len(states)
-        states = self.torchify(np.array(states))
-        costs = self.get_value(states)
-
-        grid = costs.detach().cpu().numpy()
-        grid = grid.reshape(y_pts, x_pts)
-
-        background = cv2.resize(env._get_obs(images=True), (x_pts, y_pts))
-        plt.imshow(background)
-        plt.imshow(grid.T, alpha=0.6)
-        plt.savefig(
-            osp.join(self.logdir, "trex_cost_" + str(ep)),
-            bbox_inches='tight')
+            enc_states = self.encoder(states, actions).detach()
+            costs = self.cost_model.get_cost(enc_states)
+        return costs
