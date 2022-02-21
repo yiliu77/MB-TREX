@@ -8,6 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from matplotlib.patches import Rectangle
 from torch.optim import Adam
+from models.architectures.utils import get_affine_params
+
+TORCH_DEVICE = torch.device(
+    'cuda') if torch.cuda.is_available() else torch.device('cpu')
+
 
 
 class CostNetwork(nn.Module):
@@ -48,6 +53,52 @@ class CostNetwork(nn.Module):
         return torch.cat((cum_r_i.unsqueeze(0), cum_r_j.unsqueeze(0)), 0), abs_r_i + abs_r_j
 
 
+class CostEnsemble(CostNetwork):
+    def __init__(self, num_nets, state_dim, hidden_size):
+        super().__init__()
+
+        self.lin0_w, self.lin0_b = get_affine_params(num_nets,
+                                                     state_dim, hidden_size)
+
+        self.lin1_w, self.lin1_b = get_affine_params(num_nets, hidden_size, hidden_size)
+
+        self.lin2_w, self.lin2_b = get_affine_params(num_nets, hidden_size, hidden_size)
+
+        self.lin3_w, self.lin3_b = get_affine_params(num_nets, hidden_size, 1)
+
+        self.inputs_mu = nn.Parameter(
+            torch.zeros(state_dim), requires_grad=False)
+        self.inputs_sigma = nn.Parameter(
+            torch.zeros(state_dim), requires_grad=False)
+
+    def fit_input_stats(self, data):
+        mu = np.mean(data, axis=0, keepdims=True)
+        sigma = np.std(data, axis=0, keepdims=True)
+        sigma[sigma < 1e-12] = 1.0
+
+        self.inputs_mu.data = torch.from_numpy(mu).to(TORCH_DEVICE).float()
+        self.inputs_sigma.data = torch.from_numpy(sigma).to(
+            TORCH_DEVICE).float()
+
+    def get_cost(self, states):
+        x = (states - self.inputs_mu) / self.inputs_sigma
+
+        x = F.relu(x.matmul(self.lin0_w) + self.lin0_b)
+        x = F.relu(x.matmul(self.lin1_w) + self.lin1_b)
+        x = F.relu(x.matmul(self.lin2_w) + self.lin2_b)
+        x = x.matmul(self.lin3_w) + self.lin3_b
+        return x
+
+    def get_abs_costs(self, states):
+        return torch.abs(self.get_cost(states))
+
+    def cum_return(self, traj):
+        r = self.get_cost(traj)
+        sum_rewards = torch.sum(r, axis=1)
+        sum_abs_rewards = torch.sum(torch.abs(r), axis=1)
+        return sum_rewards, sum_abs_rewards
+
+
 class TRexCost:
     def __init__(self, encoder, g_dim, params):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -69,8 +120,9 @@ class TRexCost:
                 actions2 = torch.as_tensor(np.array(actions2)).float().to(self.device)
                 label = torch.as_tensor(np.array(label)).long().to(self.device)
 
-                states1 = torch.permute(states1, (0, 3, 1, 2))
-                states2 = torch.permute(states2, (0, 3, 1, 2))
+                if self.params["use_images"]:
+                    states1 = torch.permute(states1, (0, 3, 1, 2))
+                    states2 = torch.permute(states2, (0, 3, 1, 2))
 
                 encodings1 = self.encoder(states1, actions1)
                 encodings2 = self.encoder(states2, actions2)

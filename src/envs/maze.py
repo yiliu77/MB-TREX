@@ -75,8 +75,8 @@ class Maze(Env, utils.EzPickle):
         }
         return obs, -cost, done, info
 
-    def _get_obs(self):
-        if self.use_images:
+    def _get_obs(self, images=False):
+        if self.use_images or images:
             rendered_img = self.sim.render(64, 64, camera_name="cam0")
             rendered_img[rendered_img[:, :, 0] > 200] = [255, 0, 0]
             return rendered_img
@@ -84,7 +84,7 @@ class Maze(Env, utils.EzPickle):
         state = np.concatenate([self.sim.data.qpos[:].copy(), self.sim.data.qvel[:].copy()])
         return state[:2]  # State is just (x, y) now
 
-    def reset(self, difficulty='h', check_constraint=True, pos=()):
+    def reset(self, difficulty='h', check_constraint=True, pos=(), images=False):
         pos = tuple(pos)
         if len(pos):
             self.sim.data.qpos[0] = pos[0]
@@ -113,7 +113,23 @@ class Maze(Env, utils.EzPickle):
         if constraint and check_constraint:
             if not len(pos):
                 self.reset(difficulty)
-        return self._get_obs()
+        return self._get_obs(images)
+
+    def get_expert_cost(self, states):
+        costs = []
+        for s in states:
+            d1 = (-0.15 - 0.15) ** 2 + 2 * (-0.125 - 0.125) ** 2
+            d2 = (0.15 - 0.25) ** 2 + 2 * (0.125 - (-0.25)) ** 2
+
+            if s[0] < -0.15:
+                cost = (-0.15 - s[0]) ** 2 + 2 * (-0.125 - s[1]) ** 2 + d1 + d2
+            elif s[0] < 0.15:
+                cost = (0.15 - s[0]) ** 2 + 2 * (0.125 - s[1]) ** 2 + d2
+            else:
+                cost = (0.25 - s[0]) ** 2 + 2 * (-0.25 - s[1]) ** 2
+            costs.append(cost)
+
+        return np.array(costs)
 
     def get_distance_score(self):
         d = np.sqrt(np.mean((self.goal - self.sim.data.qpos[:]) ** 2))
@@ -128,7 +144,7 @@ class Maze(Env, utils.EzPickle):
         y_bounds = [-0.25, 0.25]
 
         states, actions = [], []
-        x_pts = 60
+        x_pts = 100
         y_pts = int(x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
         for x in np.linspace(x_bounds[0], x_bounds[1], y_pts):
             for y in np.linspace(y_bounds[0], y_bounds[1], x_pts):
@@ -136,17 +152,31 @@ class Maze(Env, utils.EzPickle):
                 states.append(obs)
                 actions.append(action)
 
-        states = torch.as_tensor(np.array(states)).float().to("cuda")
-        states = torch.permute(states, (0, 3, 1, 2))
-        actions = torch.as_tensor(np.array(actions)).float().to("cuda")
+        states = torch.as_tensor(np.array(states)).float().to("cuda" if torch.cuda.is_available() else "cpu")
+        if self.use_images:
+            states = torch.permute(states, (0, 3, 1, 2))
+        actions = torch.as_tensor(np.array(actions)).float().to("cuda" if torch.cuda.is_available() else "cpu")
         costs = cost_model.get_value(states, actions)
 
         grid = costs.detach().cpu().numpy()
         grid = grid.reshape(y_pts, x_pts)
-
-        background = cv2.resize(self.reset(), (x_pts, y_pts))
+        background = cv2.resize(self.reset(images=True), (x_pts, y_pts))
+        plt.figure()
         plt.imshow(background)
         plt.imshow(grid.T, alpha=0.6)
         plt.colorbar()
-        plt.savefig(filename, bbox_inches='tight')
+        if filename:
+            plt.savefig(filename, bbox_inches='tight')
         plt.close()
+
+    def expert_action(self, noise_std=0, demo_quality='high'):
+        st = self.sim.data.qpos[:]
+        if st[0] <= -0.151:
+            delt = (np.array([-0.15, -0.125]) - st)
+        elif st[0] <= 0.149:
+            delt = (np.array([0.15, 0.125]) - st)
+        else:
+            delt = (np.array([self.goal[0], self.goal[1]]) - st)
+        act = self.gain * delt
+
+        return act
