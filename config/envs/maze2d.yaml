@@ -3,7 +3,7 @@ env:
   horizon: 50
   use_images: True
   dense_rewards: True
-  max_force: 0.3
+  max_force: 0.7
   goal_thresh: 0.03
 
 num_games: 5000

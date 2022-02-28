@@ -24,7 +24,7 @@ if __name__ == "__main__":
     env = create_env(params["env"])
 
     goal_state = env.reset(pos=env.goal)
-    goal_state = torch.permute(torch.as_tensor(np.array(goal_state)), (2, 0, 1)).unsqueeze(0)
+    goal_state = torch.as_tensor(np.array(goal_state)).permute((2, 0, 1)).unsqueeze(0)
     goal_state = goal_state.to(device).float() / 255
 
     def cost_fn(trajectory):

@@ -244,8 +244,8 @@ class SVG:
             return torch.stack(gen_seq), torch.stack(gen_h)
 
     def loss(self, sequences, actions):
-        sequences = torch.permute(sequences, (1, 0, 4, 2, 3))
-        actions = torch.permute(actions, (1, 0, 2))
+        sequences = sequences.permute((1, 0, 4, 2, 3))
+        actions = actions.permute((1, 0, 2))
 
         # initialize the hidden state.
         self.frame_predictor.hidden = self.frame_predictor.init_hidden()
@@ -333,8 +333,8 @@ class SVG:
 
     def validate(self, sequences, actions):
         with torch.no_grad():
-            sequences = torch.permute(sequences, (1, 0, 4, 2, 3))
-            actions = torch.permute(actions, (1, 0, 2))
+            sequences = sequences.permute((1, 0, 4, 2, 3))
+            actions = actions.permute((1, 0, 2))
 
             nsample = 10
             gen_seqs = [[] for _ in range(nsample)]

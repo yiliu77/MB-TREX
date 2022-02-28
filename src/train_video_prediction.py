@@ -26,15 +26,16 @@ def create_virtual_dataset(folder_path):
     print("Dataset Size", dataset_size)
 
     f = h5py.File(os.path.join(folder_path, "virtual_transition_data.h5"), 'w')
-    curr_size = 0
+    curr_size, virtual_layout_created = 0, False
     for i, file_name in enumerate(os.listdir(folder_path)):
         if "virtual" not in file_name:
             path = os.path.join(folder_path, file_name)
             start = h5py.File(path, 'r')
-            if i == 0:
+            if not virtual_layout_created:
                 layout_images = h5py.VirtualLayout(shape=(dataset_size,) + start["images"].shape[1:], dtype=np.float32)
                 layout_actions = h5py.VirtualLayout(shape=(dataset_size,) + start["actions"].shape[1:],
                                                     dtype=np.float32)
+                virtual_layout_created = True
 
             vsource_images = h5py.VirtualSource(path, "images", start["images"].shape)
             layout_images[curr_size: curr_size + vsource_images.shape[0], :, :, :, :] = vsource_images

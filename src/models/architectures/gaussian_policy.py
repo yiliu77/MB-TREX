@@ -28,7 +28,7 @@ class ContGaussianPolicy(nn.Module):
         self.action_bias = torch.as_tensor((action_high + action_low) / 2, dtype=torch.float32)
 
     def forward(self, states):
-        states = torch.permute(states, (0, 3, 1, 2)) / 255
+        states = states.permute((0, 3, 1, 2)) / 255
         embedding = self.embedding(states)
         mu, log_std = self.mu(embedding), self.log_std(embedding)
         log_std = torch.clamp(log_std, min=-20, max=2)

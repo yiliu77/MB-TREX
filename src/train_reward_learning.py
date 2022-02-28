@@ -52,6 +52,8 @@ if __name__ == "__main__":
     # TODO: change from mean of ensemble to individual ensemble to improve diversity of CEM trajectories
     # TODO: rnd for video learning
     # TODO: add more metrics: measure variance of trex ensemble members, measure GT reward over time
+    # TODO: metric for w/o RND, w/o ensemble visualmpc (individual vs ensemble)
+    # TODO: multiprocessing
 
     cost_model = TRexCost(video_prediction.create_encoding, transition_params["g_dim"], params["cost_model"])
     env.visualize_rewards("saved/models/TREX/initial.png", cost_model)

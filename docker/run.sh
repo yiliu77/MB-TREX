@@ -1,0 +1,1 @@
+sudo docker run -it --gpus '"device=all"' -e NVIDIA_VISIBLE_DEVICES=all --name mbtrex -m 100g --memory-swap 101g --shm-size=10g -v /home/users/yiliu/MB-TREX:/home/MB-TREX --rm --entrypoint bash rapidmp

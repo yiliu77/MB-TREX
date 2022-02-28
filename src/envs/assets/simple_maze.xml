@@ -25,7 +25,7 @@
     <geom name="wall2B" type="box" condim="1" pos="0.1 -0.25 .02" zaxis="-1 0 0"  size=".02 .2 .005" material="decoration" />
 
     <body name="tool" pos="0.0 -0.0 0.0" >
-      <geom name="toolgeom" rgba="1 0 0 1" type="cylinder" size="0.04 0.04  0.04 " pos="0.0 -0.00 0.04" />
+      <geom name="toolgeom" rgba="1 0 0 1" type="cylinder" size="0.025 0.025 0.025" pos="0.0 -0.00 0.04" />
       <joint name="tool_x" type="slide" pos="0 0 0" axis="1 0 0" range="-0.3 0.3" damping="0.01"/>
       <joint name="tool_y" type="slide" pos="0 0 0" axis="0 1 0" range="-0.3 0.3" damping="0.01"/>
     </body>

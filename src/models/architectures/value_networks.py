@@ -22,7 +22,7 @@ class ContTwinQNet(nn.Module):
         self.q_net2 = nn.Sequential(nn.Linear(256 + action_dim, 1))
 
     def forward(self, states, actions):
-        states = torch.permute(states, (0, 3, 1, 2)) / 255
+        states = states.permute((0, 3, 1, 2)) / 255
 
         states = self.embedding(states)
         q1_out, q2_out = self.q_net1(torch.cat([states, actions], dim=1)), self.q_net2(torch.cat([states, actions], dim=1))

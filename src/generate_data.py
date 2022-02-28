@@ -32,9 +32,16 @@ if __name__ == "__main__":
     env = create_env(params["env"])
     action_dim = env.action_space.shape[0]
 
-    model = ContSAC(action_dim, env, "cuda", ent_adj=True, n_updates_per_train=2)
-    model.train(5000, deterministic=False)
-    model.eval(100)
+    model = ContSAC(action_dim, env, "cuda", ent_adj=True)
+    all_states, all_actions = model.train(1000, deterministic=False)
+
+    if not os.path.isdir("saved/{}".format(params["env"]["type"])):
+        os.makedirs("saved/{}".format(params["env"]["type"]))
+
+    with h5py.File("saved/{}/transition_data1.hdf5".format(params["env"]["type"]), 'w') as f:
+        f.create_dataset('images', data=all_states)
+        f.create_dataset('actions', data=all_actions)
+        f.close()
 
     # num_parallel = params["num_parallel"]
     # envs = SubprocVecEnv([lambda: create_env(params["env"]) for _ in range(num_parallel)])

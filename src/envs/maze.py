@@ -137,7 +137,7 @@ class Maze(Env, utils.EzPickle):
                 actions.append(action)
 
         states = torch.as_tensor(np.array(states)).float().to("cuda")
-        states = torch.permute(states, (0, 3, 1, 2))
+        states = states.permute((0, 3, 1, 2))
         actions = torch.as_tensor(np.array(actions)).float().to("cuda")
         costs = cost_model.get_value(states, actions)
 

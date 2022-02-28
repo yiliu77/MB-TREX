@@ -1,9 +1,8 @@
 import os
-import time
 
-import wandb
 import numpy as np
 import torch
+import wandb
 from torch import nn
 from torch.nn import functional
 from torch.optim import Adam
@@ -106,7 +105,7 @@ class RNDTarget(nn.Module):
 
 
 class ContSAC:
-    def __init__(self, action_dim, env, device, memory_size=5e3, warmup_games=10, batch_size=64, lr=0.0001, gamma=0.99, tau=0.003, alpha=0.2,
+    def __init__(self, action_dim, env, device, memory_size=2e2, warmup_games=10, batch_size=64, lr=0.0001, gamma=0.99, tau=0.003, alpha=0.2,
                  ent_adj=False, target_update_interval=1, n_games_til_train=1, n_updates_per_train=20):
         self.device = device
         self.gamma = gamma
@@ -128,7 +127,7 @@ class ContSAC:
 
         self.rnd = RND().to(self.device)
         self.rnd_target = RNDTarget().to(self.device)
-        self.rnd_opt = Adam(self.rnd.parameters(), lr=lr)
+        self.rnd_opt = Adam(self.rnd.parameters(), lr=lr / 3)
         for param in self.rnd_target.parameters():
             param.requires_grad = False
 
@@ -164,7 +163,7 @@ class ContSAC:
             states = torch.as_tensor(states, dtype=torch.float32).to(self.device)
         return torch.sum(torch.square(self.rnd_target(states) - self.rnd(states)), dim=1).detach().cpu().numpy()
 
-    def train_step(self, states, actions, rewards, rewards_in, next_states, next_normalized_states, done_masks):
+    def train_step(self, states, actions, rewards, rewards_in, next_states, next_normalized_states, done_masks, index):
         if not torch.is_tensor(states):
             states = torch.as_tensor(states, dtype=torch.float32).to(self.device)
             actions = torch.as_tensor(actions, dtype=torch.float32).to(self.device)
@@ -178,7 +177,7 @@ class ContSAC:
             next_actions, next_log_probs, _ = self.policy.sample(next_states)
             next_q = self.target_twin_q(next_states, next_actions)[0]
             v = next_q - self.alpha * next_log_probs
-            expected_q = 1.0 * rewards + 20.0 * rewards_in + done_masks * self.gamma * v # 3, 10, 20
+            expected_q = rewards_in + done_masks * self.gamma * v # 3, 10, 20
 
         # Q backprop
         q_val, pred_q1, pred_q2 = self.twin_q(states, actions)
@@ -219,14 +218,18 @@ class ContSAC:
         if self.total_train_steps % self.n_until_target_update == 0:
             polyak_update(self.twin_q, self.target_twin_q, self.tau)
 
-        return {'Loss/Policy Loss': policy_loss.item(),
-                'Loss/Q Loss': q_loss.item(),
-                'Loss/Forward Loss': forward_loss.item(),
-                'Stats/Avg Q Val': q_val.mean().item(),
-                'Stats/Avg Q Next Val': next_q.mean().item(),
-                'Stats/Avg Alpha': self.alpha.item() if self.ent_adj else self.alpha}
+        losses = {'Loss/Policy Loss': policy_loss.item(),
+                  'Loss/Q Loss': q_loss.item(),
+                  'Stats/Avg Q Val': q_val.mean().item(),
+                  'Stats/Avg Q Next Val': next_q.mean().item(),
+                  'Stats/Avg Alpha': self.alpha.item() if self.ent_adj else self.alpha}
+        losses["Loss/Forward Loss"] = forward_loss.item()
+        return losses
 
     def train(self, num_games, deterministic=False):
+        all_states = []
+        all_actions = []
+
         self.policy.train()
         self.twin_q.train()
         for i in range(num_games):
@@ -267,6 +270,9 @@ class ContSAC:
                     self.memory.add(*point)
 
             states = np.array(states)
+            all_states.append(states)
+            all_actions.append(actions)
+
             self.normalization.update(states)
 
             if i % 10 == 0:
@@ -322,7 +328,7 @@ class ContSAC:
                     for j in range(n_steps * self.n_updates_per_train):
                         self.total_train_steps += 1
                         s, a, r, r_in, s_, d = self.memory.sample()
-                        train_info = self.train_step(s, a, r, r_in, s_, ((s_ - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8), d)
+                        train_info = self.train_step(s, a, r, r_in, s_, ((s_ - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8), d, i)
                         if i % 5 == 0 and j == 0:
                             train_info['Env/Rewards'] = total_reward
                             train_info['Env/Reward Ins'] = total_reward_in
@@ -330,6 +336,7 @@ class ContSAC:
                             wandb.log(train_info)
 
             print("index: {}, steps: {}, total_rewards: {}".format(i, n_steps, total_reward))
+        return np.array(all_states), np.array(all_actions)
 
     def eval(self, num_games, render=True):
         self.policy.eval()

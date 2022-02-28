@@ -1,9 +1,9 @@
 env:
   type: "maze"
-  horizon: 50
+  horizon: 30
   use_images: True
   dense_rewards: True
-  max_force: 0.5
+  max_force: 0.3
   goal_thresh: 0.03
 
 video_model:
@@ -13,7 +13,7 @@ video_model:
   image_dim: 64
   channel_dim: 3
   action_dim: 2
-  data: "./saved/maze45/transition_data.hdf5"
+  data: "./saved/maze/"
 
   n_past: 1 # TODO: allow for n_past > 1 by changing state generation code
   n_future: 5
@@ -28,13 +28,15 @@ video_model:
   beta: 0.0001
   last_frame_skip: True
 
-  epochs: 25
+  epochs: 50
   batch_size: 32 # TODO fix batchsize for video training
   lr: 0.002
   train_test_split: 0.9
   num_cores: 10
 
 cost_model:
+  ensemble_size: 5
+
   hidden_size: 64
   cost_reg: 0.0
   lr: 0.002
