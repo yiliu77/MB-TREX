@@ -75,16 +75,24 @@ class VisualMPC:
             forward_loss.backward()
             self.rnd_opt.step()
 
-            wandb.log({"VisualMPC/VideoCost_Iter_{}".format(itr): torch.mean(costs).item(),
-                       "VisualMPC/RNDCost_Iter_{}".format(itr): -np.mean(reward_ins),
-                       "VisualMPC/RNDLoss_Iter_{}".format(itr): forward_loss.item()})
-
             costs = costs.reshape(8, -1)
             costs = torch.sum(costs, dim=0).squeeze()  # costs of all action sequences
 
             sortid = costs.argsort()
             actions_sorted = action_samples[:, sortid, :]
             actions_ranked = actions_sorted[:, :self.elite_size, :]
+
+            visualized_traj = trajectory[:, sortid, :, :, :]
+            visualized_traj = visualized_traj.permute((0, 1, 3, 4, 2))
+            visualized_traj = visualized_traj.permute((0, 2, 1, 3, 4))
+            visualized_traj = visualized_traj.reshape(visualized_traj.shape[0] * visualized_traj.shape[1], visualized_traj.shape[2] * visualized_traj.shape[3], visualized_traj.shape[4])
+            traj_images = wandb.Image(visualized_traj.detach().cpu().numpy(), caption="Sequences")
+            # wandb.log({"Sequences": gen_images})
+            wandb.log({"VisualMPC/VideoCost_Iter_{}".format(itr): torch.mean(costs).item(),
+                       "VisualMPC/RNDCost_Iter_{}".format(itr): -np.mean(reward_ins),
+                       "VisualMPC/RNDLoss_Iter_{}".format(itr): forward_loss.item(),
+                       "VisualMPC/EliteCost_Iter_{}".format(itr): np.mean(costs[sortid].detach().cpu().numpy()).item(),
+                       "VisualMPC/Gen_Traj_Iter_{}".format(itr): traj_images})
 
             mean, std = actions_ranked.mean(1), actions_ranked.std(1)
             smp = torch.empty(action_samples.shape).normal_(mean=0, std=1).cuda()
