@@ -6,6 +6,7 @@ import wandb
 from torch import nn
 from torch.nn import functional
 from torch.optim import Adam
+import random
 
 from models.architectures.gaussian_policy import ContGaussianPolicy
 from models.architectures.utils import polyak_update
@@ -106,7 +107,7 @@ class RNDTarget(nn.Module):
 
 class ContSAC:
     def __init__(self, action_dim, env, device, memory_size=2e2, warmup_games=10, batch_size=64, lr=0.0001, gamma=0.99, tau=0.003, alpha=0.2,
-                 ent_adj=False, target_update_interval=1, n_games_til_train=1, n_updates_per_train=20):
+                 ent_adj=False, target_update_interval=1, n_games_til_train=1, n_updates_per_train=2):
         self.device = device
         self.gamma = gamma
         self.batch_size = batch_size
@@ -240,7 +241,7 @@ class ContSAC:
             states, actions, rewards, reward_ins, next_states, done_masks = [], [], [], [], [], []
             state = self.env.reset()
             while not done:
-                if i <= 2 * self.warmup_games:
+                if i <= 2 * self.warmup_games or random.random() < 0.1:
                     action = self.env.action_space.sample()
                 else:
                     action = self.get_action(state, deterministic)

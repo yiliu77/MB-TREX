@@ -1,17 +1,15 @@
+import os
 import sys
 
-import os
 import h5py
 import numpy as np
-import tqdm
-import wandb
 import yaml
 from yaml import CLoader
 
-from parser import create_env
-from stable_baselines3.common.vec_env import SubprocVecEnv
-
+import wandb
 from models.sac import ContSAC
+from parser import create_env
+
 
 def unit_vector(vector):
     return vector / np.linalg.norm(vector)
@@ -33,12 +31,12 @@ if __name__ == "__main__":
     action_dim = env.action_space.shape[0]
 
     model = ContSAC(action_dim, env, "cuda", ent_adj=True)
-    all_states, all_actions = model.train(1000, deterministic=False)
+    all_states, all_actions = model.train(3000, deterministic=False)
 
     if not os.path.isdir("saved/{}".format(params["env"]["type"])):
         os.makedirs("saved/{}".format(params["env"]["type"]))
 
-    with h5py.File("saved/{}/transition_data1.hdf5".format(params["env"]["type"]), 'w') as f:
+    with h5py.File("saved/{}/transition_data4.hdf5".format(params["env"]["type"]), 'w') as f:
         f.create_dataset('images', data=all_states)
         f.create_dataset('actions', data=all_actions)
         f.close()

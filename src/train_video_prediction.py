@@ -23,6 +23,7 @@ def create_virtual_dataset(folder_path):
     for i, file_name in enumerate(os.listdir(folder_path)):
         if "virtual" not in file_name:
             dataset_size += len(h5py.File(os.path.join(folder_path, file_name), 'r')["images"])
+            print(file_name, len(h5py.File(os.path.join(folder_path, file_name), 'r')["images"]))
     print("Dataset Size", dataset_size)
 
     f = h5py.File(os.path.join(folder_path, "virtual_transition_data.h5"), 'w')

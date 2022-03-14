@@ -16,7 +16,7 @@ video_model:
   data: "./saved/maze/"
 
   n_past: 1 # TODO: allow for n_past > 1 by changing state generation code
-  n_future: 5
+  n_future: 10
 
   rnn_size: 256
   prior_rnn_layers: 1

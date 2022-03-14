@@ -56,12 +56,10 @@ class TRexCost:
         self.encoder = encoder
         self.params = params
 
-        self.cost_models = [CostNetwork(g_dim, params["hidden_size"]).to(device=self.device) for _ in range(params["ensemble_size"])]
-        self.cost_opts = [Adam(self.cost_models[i].parameters(), lr=params["lr"]) for i in range(len(self.cost_models))]
+        self.rew_models = [CostNetwork(g_dim, params["hidden_size"]).to(device=self.device) for _ in range(params["ensemble_size"])]
+        self.cost_opts = [Adam(self.rew_models[i].parameters(), lr=params["lr"]) for i in range(len(self.rew_models))]
 
     def train(self, all_states1, all_actions1, all_states2, all_actions2, all_labels, num_epochs):
-        loss_fn = nn.CrossEntropyLoss()
-
         for epoch in range(num_epochs):
             for i in range(len(all_states1)):
                 states1, actions1, states2, actions2 = all_states1[i], all_actions1[i], all_states2[i], all_actions2[i]
@@ -75,33 +73,35 @@ class TRexCost:
                 encodings1 = self.encoder(states1, actions1).detach()
                 encodings2 = self.encoder(states2, actions2).detach()
 
-                for j in range(len(self.cost_models)):
-                    if all_labels[i] != 0.5:
-                        outputs, abs_costs = self.cost_models[j](encodings1, encodings2)
-                        outputs = outputs.unsqueeze(0)
+                for j in range(len(self.rew_models)):
+                    outputs, abs_costs = self.rew_models[j](encodings1, encodings2)
+                    outputs = outputs.unsqueeze(0)
+                    softmax_outputs = torch.softmax(outputs, dim=1)
+                    labels = torch.as_tensor(all_labels[i]).long().to(self.device).unsqueeze(0)
 
-                        train_loss = loss_fn(outputs, 1 - torch.as_tensor(all_labels[i]).long().to(self.device).unsqueeze(0)) + self.params["cost_reg"] * abs_costs
+                    train_loss = -((1 - labels) * softmax_outputs[:, 0] + labels * softmax_outputs[:, 1]) + \
+                                 self.params["cost_reg"] * abs_costs
 
-                        self.cost_opts[j].zero_grad()
-                        train_loss.backward()
-                        self.cost_opts[j].step()
+                    self.cost_opts[j].zero_grad()
+                    train_loss.backward()
+                    self.cost_opts[j].step()
 
     def get_value(self, states, actions):
         with torch.no_grad():
             enc_states = self.encoder(states, actions)
-            abs_costs = torch.mean(torch.cat([self.cost_models[i].get_cost(enc_states) for i in range(len(self.cost_models))], dim=1), dim=1)
-        return abs_costs
+            rewards = torch.mean(torch.cat([self.rew_models[i].get_cost(enc_states) for i in range(len(self.rew_models))], dim=1), dim=1)
+        return -rewards
 
     def get_queries(self, query_states, query_actions, num_queries):
         enc_states = self.encoder(query_states, query_actions)
-        rewards = torch.cat([self.cost_models[i].get_cost(enc_states) for i in range(len(self.cost_models))], dim=2)
+        rewards = torch.cat([self.rew_models[i].get_cost(enc_states) for i in range(len(self.rew_models))], dim=2)
         indices = itertools.combinations(range(query_states), 2)
         reward_pair1, reward_pair2 = rewards[indices[0]], rewards[indices[1]]
         probs = 1 / (1 + torch.exp(-(reward_pair1 - reward_pair2)))
 
         avg_probs = torch.mean(probs, dim=1)
         avg_entropy = -np.sum(avg_probs * torch.log2(avg_probs))
-        ind_entropy = -np.sum(torch.cat([probs[i] * np.log2(probs[i]) for i in range(len(self.cost_models))]))
+        ind_entropy = -np.sum(torch.cat([probs[i] * np.log2(probs[i]) for i in range(len(self.rew_models))]))
         return torch.argmax()
 
     def plot(self, ep):

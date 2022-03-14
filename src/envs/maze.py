@@ -84,7 +84,7 @@ class Maze(Env, utils.EzPickle):
         state = np.concatenate([self.sim.data.qpos[:].copy(), self.sim.data.qvel[:].copy()])
         return state[:2]  # State is just (x, y) now
 
-    def reset(self, difficulty='h', check_constraint=True, pos=()):
+    def reset(self, difficulty='fixed', check_constraint=True, pos=()):
         pos = tuple(pos)
         if len(pos):
             self.sim.data.qpos[0] = pos[0]
@@ -92,13 +92,21 @@ class Maze(Env, utils.EzPickle):
         else:
             if difficulty is None:
                 self.sim.data.qpos[0] = np.random.uniform(-0.27, 0.27)
+                self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
             elif difficulty == 'e':
                 self.sim.data.qpos[0] = np.random.uniform(0.14, 0.22)
+                self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
             elif difficulty == 'm':
                 self.sim.data.qpos[0] = np.random.uniform(-0.04, 0.04)
+                self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
             elif difficulty == 'h':
                 self.sim.data.qpos[0] = np.random.uniform(-0.22, -0.13)
-            self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
+                self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
+            elif difficulty == 'fixed':
+                self.sim.data.qpos[0] = -0.2
+                self.sim.data.qpos[1] = -0.2
+            else:
+                raise NotImplementedError
 
         self.steps = 0
         # Randomize wal positions
@@ -112,7 +120,7 @@ class Maze(Env, utils.EzPickle):
         constraint = int(self.sim.data.ncon > 3)
         if constraint and check_constraint:
             if not len(pos):
-                self.reset(difficulty)
+                self.reset(difficulty, check_constraint=check_constraint)
         return self._get_obs()
 
     def get_distance_score(self):

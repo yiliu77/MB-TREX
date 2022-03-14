@@ -58,8 +58,8 @@ class VisualMPC:
             normalized_states = ((permuted_trajectory - torch.as_tensor(self.normalization.mean).float().to(self.device)) /
                                  torch.as_tensor(np.sqrt(self.normalization.var)).float().to(self.device)).clip(-8, 8).detach()
             reward_ins = torch.sum(torch.square(self.rnd_target(normalized_states) - self.rnd(normalized_states)), dim=1).detach()
-            costs -= (reward_ins - torch.as_tensor(self.reward_normalization.mean).float().to(self.device)) / \
-                     torch.as_tensor(np.sqrt(self.reward_normalization.var)).float().to(self.device)
+            # costs -= (reward_ins - torch.as_tensor(self.reward_normalization.mean).float().to(self.device)) / \
+            #          torch.as_tensor(np.sqrt(self.reward_normalization.var)).float().to(self.device)
 
             reward_ins = reward_ins.cpu().numpy()
             mean, std, count = np.mean(reward_ins), np.std(reward_ins), len(reward_ins)
