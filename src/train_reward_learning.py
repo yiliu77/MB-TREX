@@ -54,20 +54,24 @@ if __name__ == "__main__":
     # TODO: metric for w/o RND, w/o ensemble visualmpc (individual vs ensemble)
     # TODO: visualize each cem step
     # TODO show ground truth env vs visual mpc trajectory
+    # TODO: cem with ground truth
+    # TODO: rerun CEM with 15 frames ahead instead of 8
 
     cost_model = TRexCost(video_prediction.create_encoding, transition_params["g_dim"], params["cost_model"])
     env.visualize_rewards("saved/models/TREX/initial.png", cost_model)
 
     agent_model = VisualMPC(video_prediction, cost_model.get_value, params["env"]["horizon"], env)
-    for iteration in range(100):
+    for iteration in range(1000):
         all_states = []
         state = env.reset()
         t = 1
+        total_reward = 0
         done = False
         while not done:
             action, generated_traj, generated_actions = agent_model.act(state)
             next_state, reward, done, info = env.step(action)
             print(action, t, reward)
+            total_reward += reward
 
             # from matplotlib import pyplot as plt
             # plt.imshow(state)
@@ -79,6 +83,7 @@ if __name__ == "__main__":
             all_states.append(state)
             state = next_state
             t += 1
+        wandb.log({"Total Reward": total_reward})
 
         all_states = np.array(all_states)
         all_states = np.reshape(all_states, (all_states.shape[0] * all_states.shape[1], all_states.shape[2], all_states.shape[3]))

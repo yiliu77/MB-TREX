@@ -47,10 +47,10 @@ class VisualMPC:
 
         for itr in range(10):  # TODO
             curr_states = obs.repeat(self.sample_size, 1, 1, 1)
-            trajectory, _ = self.video_prediction.predict_states(curr_states, action_samples, 8)  # self.horizon - t) # TODO check both time and future prediction
+            trajectory, _ = self.video_prediction.predict_states(curr_states, action_samples, 15)  # self.horizon - t) # TODO check both time and future prediction
 
-            reshaped_trajectory = trajectory[:8].reshape(-1, trajectory.shape[2], trajectory.shape[3], trajectory.shape[4])
-            reshaped_actions = action_samples[:8].reshape(-1, action_samples.shape[2])
+            reshaped_trajectory = trajectory[:15].reshape(-1, trajectory.shape[2], trajectory.shape[3], trajectory.shape[4])
+            reshaped_actions = action_samples[:15].reshape(-1, action_samples.shape[2])
             costs = self.cost_fn(reshaped_trajectory, reshaped_actions)
 
             # Train RND
@@ -58,8 +58,8 @@ class VisualMPC:
             normalized_states = ((permuted_trajectory - torch.as_tensor(self.normalization.mean).float().to(self.device)) /
                                  torch.as_tensor(np.sqrt(self.normalization.var)).float().to(self.device)).clip(-8, 8).detach()
             reward_ins = torch.sum(torch.square(self.rnd_target(normalized_states) - self.rnd(normalized_states)), dim=1).detach()
-            # costs -= (reward_ins - torch.as_tensor(self.reward_normalization.mean).float().to(self.device)) / \
-            #          torch.as_tensor(np.sqrt(self.reward_normalization.var)).float().to(self.device)
+            costs -= (reward_ins - torch.as_tensor(self.reward_normalization.mean).float().to(self.device)) / \
+                     torch.as_tensor(np.sqrt(self.reward_normalization.var)).float().to(self.device)
 
             reward_ins = reward_ins.cpu().numpy()
             mean, std, count = np.mean(reward_ins), np.std(reward_ins), len(reward_ins)
@@ -75,7 +75,7 @@ class VisualMPC:
             forward_loss.backward()
             self.rnd_opt.step()
 
-            costs = costs.reshape(8, -1)
+            costs = costs.reshape(15, -1)
             costs = torch.sum(costs, dim=0).squeeze()  # costs of all action sequences
 
             sortid = costs.argsort()

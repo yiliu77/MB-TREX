@@ -1,5 +1,8 @@
-import pygame
 import numpy as np
+import pygame
+import pickle
+import os
+
 
 class Human:
     def get_demo(self, n):
@@ -12,47 +15,20 @@ class Human:
 class MazeHuman(Human):
     def __init__(self, env):
         self.env = env
+        self.guidance_points = []
 
         pygame.init()
         screen_width, screen_height = 400, 400
         screen = pygame.display.set_mode((screen_width, screen_height))
 
-        print("start guidance")
-        line_start = np.array([50, 300])
-        done = False
-        obs = self.env.reset()
-        while not done:
-            screen.fill((255, 255, 255))
-            obs_image = pygame.surfarray.make_surface(np.transpose(obs, (1, 0, 2)))
-            obs_image = pygame.transform.scale2x(obs_image)
-            obs_image = pygame.transform.scale2x(obs_image)
-            screen.blit(obs_image, (0, 0))
-
-            mouse_pos = np.array(pygame.mouse.get_pos())
-            action_delta = np.clip((mouse_pos - line_start) / 100, self.env.action_space.low,
-                                   self.env.action_space.high)
-            pygame.draw.line(screen, (255, 0, 0), tuple(line_start), tuple(line_start + action_delta * 100), 7)
-
-            for event in pygame.event.get():
-                if event.type == pygame.MOUSEBUTTONUP:
-                    next_obs, reward, done, _ = self.env.step(action_delta)
-                    print(self.calc_coords(np.transpose(obs, (2, 0, 1)) / 255))
-                    obs = next_obs
-            pygame.display.update()
-
-        pygame.quit()
-
-    def get_demo(self, n):
-        pygame.init()
-        screen_width, screen_height = 400, 400
-        screen = pygame.display.set_mode((screen_width, screen_height))
-        all_traj_obs = []
-        all_traj_actions = []
-
-        line_start = np.array([50, 300])
-        for _ in range(n):
+        if os.path.exists('./saved/humans/maze_guidance.pkl'):
+            print("Guidance found")
+            with open('./saved/humans/maze_guidance.pkl', 'r') as f:
+                self.guidance_points = pickle.load(f)
+        else:
+            print("Start guidance")
+            line_start = np.array([50, 300])
             done = False
-            all_obs, all_actions = [], []
             obs = self.env.reset()
             while not done:
                 screen.fill((255, 255, 255))
@@ -62,21 +38,64 @@ class MazeHuman(Human):
                 screen.blit(obs_image, (0, 0))
 
                 mouse_pos = np.array(pygame.mouse.get_pos())
-                action_delta = np.clip((mouse_pos - line_start) / 100, self.env.action_space.low, self.env.action_space.high)
+                action_delta = np.clip((mouse_pos - line_start) / 100, self.env.action_space.low,
+                                       self.env.action_space.high)
                 pygame.draw.line(screen, (255, 0, 0), tuple(line_start), tuple(line_start + action_delta * 100), 7)
 
                 for event in pygame.event.get():
                     if event.type == pygame.MOUSEBUTTONUP:
                         next_obs, reward, done, _ = self.env.step(action_delta)
-                        all_obs.append(obs)
-                        all_actions.append(action_delta)
+                        self.guidance_points.append(self.calc_coords(obs / 255))
                         obs = next_obs
                 pygame.display.update()
 
-            all_traj_obs.append(np.transpose(np.array(all_obs), (0, 3, 1, 2)) / 255)
-            all_traj_actions.append(np.array(all_actions))
+            pygame.quit()
+            os.makedirs('./saved/humans/')
+            with open('./saved/humans/maze_guidance.pkl', "wb") as f:
+                pickle.dump(self.guidance_points, f)
+            print("End guidance")
 
-        pygame.quit()
+    def get_demo(self, n):
+        if os.path.exists('./saved/humans/maze_demo_{}.pkl'.format(n)):
+            print("Demos found")
+            with open('./saved/humans//maze_demo_{}.pkl'.format(n), 'r') as f:
+                all_traj_obs, all_traj_actions = pickle.load(f)
+        else:
+            print("Start demo generation", n)
+            pygame.init()
+            screen_width, screen_height = 400, 400
+            screen = pygame.display.set_mode((screen_width, screen_height))
+            all_traj_obs = []
+            all_traj_actions = []
+
+            line_start = np.array([50, 300])
+            for _ in range(n):
+                done = False
+                all_obs, all_actions = [], []
+                obs = self.env.reset()
+                while not done:
+                    screen.fill((255, 255, 255))
+                    obs_image = pygame.surfarray.make_surface(np.transpose(obs, (1, 0, 2)))
+                    obs_image = pygame.transform.scale2x(obs_image)
+                    obs_image = pygame.transform.scale2x(obs_image)
+                    screen.blit(obs_image, (0, 0))
+
+                    mouse_pos = np.array(pygame.mouse.get_pos())
+                    action_delta = np.clip((mouse_pos - line_start) / 100, self.env.action_space.low, self.env.action_space.high)
+                    pygame.draw.line(screen, (255, 0, 0), tuple(line_start), tuple(line_start + action_delta * 100), 7)
+
+                    for event in pygame.event.get():
+                        if event.type == pygame.MOUSEBUTTONUP:
+                            next_obs, reward, done, _ = self.env.step(action_delta)
+                            all_obs.append(obs)
+                            all_actions.append(action_delta)
+                            obs = next_obs
+                    pygame.display.update()
+
+                all_traj_obs.append(np.transpose(np.array(all_obs), (0, 3, 1, 2)) / 255)
+                all_traj_actions.append(np.array(all_actions))
+
+            pygame.quit()
         return all_traj_obs, all_traj_actions
 
     def query_preference(self, paired_states1, paired_states2):
@@ -84,9 +103,24 @@ class MazeHuman(Human):
         labels = []
 
         for states1, states2 in zip(paired_states1, paired_states2):
+            score1, score2 = 0, 0
             for j in range(states1.shape[0]):
-                print(self.calc_coords(states1[j]))
-                print(self.calc_coords(states2[j]))
+                frame_x, frame_y = self.calc_coords(states1[j])
+                closest_dist, closest_index = 999999999999, 0
+                for i, (x, y) in enumerate(self.guidance_points):
+                    if (frame_x - x) ** 2 + (frame_y - y) ** 2 < closest_dist:
+                        closest_dist = (frame_x - x) ** 2 + (frame_y - y) ** 2
+                        closest_index = i
+                score1 += -closest_index
+
+                frame_x, frame_y = self.calc_coords(states2[j])
+                closest_dist, closest_index = 999999999999, 0
+                for i, (x, y) in enumerate(self.guidance_points):
+                    if (frame_x - x) ** 2 + (frame_y - y) ** 2 < closest_dist:
+                        closest_dist = (frame_x - x) ** 2 + (frame_y - y) ** 2
+                        closest_index = i
+                score2 += -closest_index
+            labels.append(0 if score1 > score2 else 1)
 
         # curr_image = 0
 
@@ -137,7 +171,6 @@ class MazeHuman(Human):
 
     @staticmethod
     def calc_coords(frame):
-        state = np.transpose(frame[:, :, :], (1, 2, 0))
-        state = state[:, :, 0] > 0.7
+        state = np.logical_and(frame[:, :, 0] > 0.5, frame[:, :, 1] < 0.5)
         x, y = np.argwhere(state).mean(0)
         return x, y
