@@ -20,7 +20,7 @@ class VisualMPC:
         for param in self.rnd_target.parameters():
             param.requires_grad = False
 
-        self.normalization = RunningMeanStd(shape=(1, 64, 64, 3))
+        self.normalization = RunningMeanStd(shape=(1, 64, 64, 3)) # TODO
         self.reward_normalization = RunningMeanStd()
 
         self.horizon = horizon
@@ -45,7 +45,7 @@ class VisualMPC:
         action_samples = torch.as_tensor(action_samples).to(self.device)
         action_samples = action_samples.permute(1, 0, 2)
 
-        for itr in range(10):  # TODO
+        for itr in range(5):  # TODO
             curr_states = obs.repeat(self.sample_size, 1, 1, 1)
             trajectory, _ = self.video_prediction.predict_states(curr_states, action_samples, 15)  # self.horizon - t) # TODO check both time and future prediction
 
@@ -66,15 +66,6 @@ class VisualMPC:
             self.reward_normalization.update_from_moments(mean, std ** 2, count)
             self.normalization.update(permuted_trajectory.cpu().numpy())  # TODO move normalization out
 
-            forward_fn = nn.MSELoss(reduction='none')
-            self.rnd_opt.zero_grad()
-            forward_loss = forward_fn(self.rnd(normalized_states), self.rnd_target(normalized_states).detach()).mean(-1)
-            mask = torch.rand(len(forward_loss)).to(self.device)
-            mask = (mask < 0.25).float().to(self.device)
-            forward_loss = (forward_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
-            forward_loss.backward()
-            self.rnd_opt.step()
-
             costs = costs.reshape(15, -1)
             costs = torch.sum(costs, dim=0).squeeze()  # costs of all action sequences
 
@@ -90,7 +81,6 @@ class VisualMPC:
             # wandb.log({"Sequences": gen_images})
             wandb.log({"VisualMPC/VideoCost_Iter_{}".format(itr): torch.mean(costs).item(),
                        "VisualMPC/RNDCost_Iter_{}".format(itr): -np.mean(reward_ins),
-                       "VisualMPC/RNDLoss_Iter_{}".format(itr): forward_loss.item(),
                        "VisualMPC/EliteCost_Iter_{}".format(itr): np.mean(costs[sortid].detach().cpu().numpy()).item(),
                        "VisualMPC/Gen_Traj_Iter_{}".format(itr): traj_images})
 
@@ -107,4 +97,26 @@ class VisualMPC:
 
         action = mean[0][0]
         mean_trajectory, _ = self.video_prediction.predict_states(curr_states, mean, self.horizon)
+
+        # TODO check this
+        reshaped_trajectory = mean_trajectory[:15].reshape(-1, mean_trajectory.shape[2], trajectory.shape[3], trajectory.shape[4])
+        print(reshaped_trajectory.shape)
+
+        # Train RND
+        if t % 4 == 0:
+            permuted_trajectory = reshaped_trajectory.detach().permute((0, 2, 3, 1))
+            normalized_states = ((permuted_trajectory - torch.as_tensor(self.normalization.mean).float().to(self.device)) /
+                                 torch.as_tensor(np.sqrt(self.normalization.var)).float().to(self.device)).clip(-8,
+                                                                                                                8).detach()
+
+            forward_fn = nn.MSELoss(reduction='none')
+            self.rnd_opt.zero_grad()
+            forward_loss = forward_fn(self.rnd(normalized_states), self.rnd_target(normalized_states).detach()).mean(-1)
+            mask = torch.rand(len(forward_loss)).to(self.device)
+            mask = (mask < 0.25).float().to(self.device)
+            forward_loss = (forward_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
+            forward_loss.backward()
+            self.rnd_opt.step()
+            wandb.log({"VisualMPC/RNDLoss_Iter": forward_loss.item()})
+
         return action.detach().cpu().numpy(), mean_trajectory.detach().cpu().numpy()[:8, 0, :, :, :], mean.detach().cpu().numpy()[:8, 0, :]

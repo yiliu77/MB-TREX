@@ -67,7 +67,7 @@ class Encoder(nn.Module):
             return h6
 
         h6 = torch.cat([h6, action], dim=1)
-        h6 = self.hidden(h6)  # TODO add activation
+        h6 = self.hidden(h6)
         return h6, [h1, h2, h3, h4]
 
 
@@ -214,7 +214,7 @@ class SVG:
     def kl_div(self, mu1, log_var1, mu2, log_var2):
         KLD = 0.5 * torch.log(log_var2.exp() / log_var1.exp()) + (log_var1.exp() + (mu1 - mu2).pow(2)) / (
                 2 * log_var2.exp()) - 1 / 2
-        return torch.mean(KLD)  # TODO
+        return torch.mean(KLD)
 
     def create_encoding(self, states, actions):
         with torch.no_grad():

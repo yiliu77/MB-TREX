@@ -2,6 +2,7 @@ import numpy as np
 import pygame
 import pickle
 import os
+import wandb
 
 
 class Human:
@@ -102,6 +103,7 @@ class MazeHuman(Human):
         # Trajectories are L x C x H x W
         labels = []
 
+        mean_scores1, mean_scores2 = 0, 0
         for states1, states2 in zip(paired_states1, paired_states2):
             score1, score2 = 0, 0
             for j in range(states1.shape[0]):
@@ -121,6 +123,11 @@ class MazeHuman(Human):
                         closest_index = i
                 score2 += -closest_index
             labels.append(0 if score1 > score2 else 1)
+
+            mean_scores1 += score1
+            mean_scores2 += score2
+        wandb.log({"Query Score1": mean_scores1 / len(paired_states1),
+                   "Query Score2": mean_scores2 / len(paired_states2)})
 
         # curr_image = 0
 

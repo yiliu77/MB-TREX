@@ -59,6 +59,8 @@ class TRexCost:
         self.rew_models = [CostNetwork(g_dim, params["hidden_size"]).to(device=self.device) for _ in range(params["ensemble_size"])]
         self.cost_opts = [Adam(self.rew_models[i].parameters(), lr=params["lr"]) for i in range(len(self.rew_models))]
 
+        # TODO: plot accuracy and also combine into batches
+
     def train(self, all_states1, all_actions1, all_states2, all_actions2, all_labels, num_epochs):
         for epoch in range(num_epochs):
             for i in range(len(all_states1)):

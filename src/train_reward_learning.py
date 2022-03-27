@@ -56,6 +56,7 @@ if __name__ == "__main__":
     # TODO show ground truth env vs visual mpc trajectory
     # TODO: cem with ground truth
     # TODO: rerun CEM with 15 frames ahead instead of 8
+    # TODO: change rnd to only train at the end
 
     cost_model = TRexCost(video_prediction.create_encoding, transition_params["g_dim"], params["cost_model"])
     env.visualize_rewards("saved/models/TREX/initial.png", cost_model)
@@ -68,7 +69,7 @@ if __name__ == "__main__":
         total_reward = 0
         done = False
         while not done:
-            action, generated_traj, generated_actions = agent_model.act(state)
+            action, generated_traj, generated_actions = agent_model.act(state, t)
             next_state, reward, done, info = env.step(action)
             print(action, t, reward)
             total_reward += reward
