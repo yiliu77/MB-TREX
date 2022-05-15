@@ -19,13 +19,7 @@ from functools import partial
 from bc import BCEnsemble
 from itertools import combinations, product
 
-# Generate validation set half in free space and half along walls moving into walls to compare methods
-# Train for longer
-# Artificially generate good data near walls
-# Increase random data
-# Bigger network
 
-# Behavior cloning in open maze, add noise to get suboptimal demonstrations, degredation plots
 def plot_cost_function(cost_model, num_pts=100, **kwargs):
     x_bounds = [-0.3, 0.3]
     y_bounds = [-0.3, 0.3]
@@ -43,7 +37,6 @@ def plot_cost_function(cost_model, num_pts=100, **kwargs):
 def dynamics_error(states, env=None, dynamics=None):
     angles = np.arange(0, 2 * np.pi, np.pi / 3)
     acs = np.stack([np.cos(angles), np.sin(angles)]).T
-    # acs = np.array([env.action_space.sample() for _ in range(8)])
     state_acs = np.concatenate((np.repeat(states, len(acs), axis=0), np.tile(acs, (len(states), 1))), axis=1)
     predictions = dynamics(torch.from_numpy(state_acs).to(device).float()).detach().cpu().numpy()
     actual = []
@@ -115,18 +108,6 @@ if __name__ == "__main__":
         plt.close()
 
         rnd.update_stats_from_states(torch.from_numpy(transitions[np.random.permutation(np.arange(transitions.shape[0]))[:100]][:, 0]).to(device))
-
-    # TODO: intrinsic motivation using RND
-    # TODO: down the line skill discovery methods
-
-    # TODO: change from mean of ensemble to individual ensemble to improve diversity of CEM trajectories
-    # TODO: rnd for video learning
-    # TODO: add more metrics: measure variance of trex ensemble members, measure GT reward over time
-    # March 7:
-    # TODO: heatmap of dynamics
-    # TODO: Plan using gt dynamcis wrt good learned reward function
-    # TODO: Improve training of dynamics: validation and patience
-    # TODO: Change dynamics to predict delta
 
     cost_model = TRexCost(lambda x, y: x, 2, params["cost_model"], num_nets=1)
     env.visualize_rewards(os.path.join(logdir, "initial.png"), cost_model)
@@ -324,12 +305,8 @@ if __name__ == "__main__":
         plt.imshow(background, extent=[0, 100, 100, 0])
         for demo in demo_trajs:
             plt.plot(demo[0][:, 0] * 100 / 0.6 + 50, demo[0][:, 1]  * 100 / 0.6 + 50)
-        # plt.plot(demo_2["obs"][:-1, 0] * 100 / 0.6 + 50, demo_2["obs"][:-1, 1]  * 100 / 0.6 + 50)
         plt.savefig(os.path.join(logdir, "demos.png"))
     
-    # paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [demo_1['obs'][:-1]], [demo_1['acs']], [demo_2['obs'][:-1]], [demo_2['acs']], [int(demo_1['cost_sum'] > demo_2['cost_sum'])]
-    # paired_states1, paired_actions1, paired_states2, paired_actions2 = states1, acs1, states2, acs2
-    # cost_model.train(paired_states1, paired_actions1, paired_states2, paired_actions2, labels, 10)
     eval_success_rate = []
     num_success = 0
     for iteration in range(params["cost_model"]["episodes"]):
@@ -346,13 +323,6 @@ if __name__ == "__main__":
             next_state, reward, done, info = env.step(action)
             cem_actions.append(generated_actions)
             cem_states.append(generated_states)
-            # from matplotlib import pyplot as plt
-            # plt.imshow(state)
-            # plt.show()
-
-            # if t % 4 == 0:
-            #     query_states.append(generated_traj)
-            #     query_actions.append(generated_actions)
             all_states.append(state)
             all_actions.append(action.detach().cpu().numpy())
 
@@ -366,21 +336,6 @@ if __name__ == "__main__":
         query_actions = cem_actions[time_step]
         query_states = cem_states[time_step]
 
-        # update the dynamcis online:
-        # if iteration % transition_params["online_update_freq"] == 0:
-        #     dyn_data = np.concatenate((np.array(all_states[:-1, :]), np.array(all_actions[:-1, :]), np.array(all_states[1:, :])), axis=0).T
-        #     dyn_data = torch.from_numpy(dyn_data).to(device)
-        #     dynamics.train_dynamics(dyn_data, 4, batch_size=len(dyn_data), val_split=1, update_stats=False)
-
-
-        # all_states = np.array(all_states)
-        # # all_states = np.reshape(all_states, (all_states.shape[0] * all_states.shape[1], all_states.shape[2], all_states.shape[3]))
-        #
-        # # for states, actions in zip(query_states, query_actions):
-        # #     print(states.shape, actions.shape)
-        #
-        # # query_states_np = np.transpose(np.array(query_states), (0, 1, 3, 4, 2))
-        # query_actions_np = np.array(query_actions)
 
         indices = list(combinations(range(len(query_states)), 2))
         np.random.shuffle(indices)
@@ -440,7 +395,6 @@ if __name__ == "__main__":
         paired_actions2 += new_paired_actions2
         labels += new_labels
 
-        # cost_model.train(torch.from_numpy(np.stack(paired_states1)), torch.from_numpy(np.stack(paired_actions1)), torch.from_numpy(np.stack(paired_states2)), torch.from_numpy(np.stack(paired_actions2)), torch.from_numpy(np.array(labels)), 1)
         cost_model.train(paired_states1, paired_actions1, paired_states2, paired_actions2, labels, 1)
         if iteration % 5 == 0:
             env.visualize_rewards(os.path.join(logdir, "cost_ep" + str(iteration) + ".png"), cost_model)
