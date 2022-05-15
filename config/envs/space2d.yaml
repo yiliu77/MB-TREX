@@ -1,16 +1,19 @@
 env:
-  type: "maze"
-  horizon: 20
+  type: "space"
+  horizon: 50
   use_images: False
   dense_rewards: True
   max_force: 0.3
   goal_thresh: 0.03
+  walls: False
 
 dynamics_model:
-  epochs: 25
+  num_dynamics_iters: 100000
+  gt_dynamics: False
+  epochs: 50
   batch_size: 32 # TODO fix batchsize for video training
   lr: 0.002
-  train_test_split: 0.9
+  train_test_split: 1.0
   num_cores: 10
 
 cost_model:
@@ -18,9 +21,11 @@ cost_model:
   cost_reg: 0.0
   lr: 0.002
   use_images: False
+  episodes: 100
 
 mpc:
   cem_iters: 5
   cem_pop_size: 200
   cem_elites: 20
   ensemble: False
+  rnd_weight: 0.1

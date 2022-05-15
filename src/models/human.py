@@ -105,20 +105,19 @@ class LowDimHuman(Human):
         self.same_margin = same_margin
 
 
-    def get_demo(self, noise_mode=None, noise_param=0.0):
+    def get_demo(self, noise_mode=None, noise_param=0.0, length=None):
         obs_lst, acs, cost_sum, costs = [self.env.reset()], [], 0, []
-        for i in range(self.env.horizon):
+        for i in range(length if length is not None else self.env.horizon):
             if noise_mode == "eps_greedy":
                 assert(noise_param < 1)
                 if np.random.random() < noise_param:
                     a = self.env.action_space.sample()
                 else:
-                    a = self.expert_action()
+                    a = self.env.expert_action()
             elif noise_mode == "gaussian":
                 a = np.array(self.env.expert_action()) + noise_param * np.random.normal(0, 1, self.env.action_space.shape[0])
             else:
                 a = self.env.expert_action()
-            acs.append(a)
             obs, cost, done, info = self.env.step(a)
             obs_lst.append(obs)
             acs.append(a)
@@ -128,7 +127,7 @@ class LowDimHuman(Human):
                 break
         expert_cost = self.env.get_expert_cost([info['gt_state']])[0]
         return {
-            "obs": np.array(obs),
+            "obs": np.array(obs_lst),
             "noise": noise_param,
             "acs": np.array(acs),
             "cost_sum": cost_sum,

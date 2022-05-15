@@ -1,0 +1,15 @@
+env:
+  type: "maze"
+  horizon: 30
+  use_images: False
+  dense_rewards: True
+  max_force: 2
+  goal_thresh: 0.05
+  walls: True
+
+cost_model:
+  hidden_size: 512
+  cost_reg: 0.0
+  lr: 0.002
+  use_images: False
+  episodes: 100

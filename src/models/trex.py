@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from matplotlib.patches import Rectangle
 from torch.optim import Adam
 from models.architectures.utils import get_affine_params
+from itertools import combinations
 
 TORCH_DEVICE = torch.device(
     'cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -18,33 +19,29 @@ TORCH_DEVICE = torch.device(
 class CostNetwork(nn.Module):
     def __init__(self, state_dim, hidden_size):
         super().__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, hidden_size)
-        self.fc4 = nn.Linear(hidden_size, 1)
+        self.model = nn.Sequential(
+            nn.Linear(state_dim, hidden_size),
+            nn.SELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.SELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.SELU(),
+            nn.Linear(hidden_size, 1)
+        )
 
     # N x statedim
     def cum_return(self, traj):
-        x = F.relu(self.fc1(traj))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        r = self.fc4(x)
+        r = self.model(traj)
         sum_rewards = torch.sum(r)
         sum_abs_rewards = torch.sum(torch.abs(r))
         return sum_rewards, sum_abs_rewards
 
     def get_abs_costs(self, states):
-        x = F.relu(self.fc1(states))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        r = self.fc4(x)
+        r = self.model(states)
         return torch.abs(r)
 
     def get_cost(self, states):
-        x = F.relu(self.fc1(states))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        r = self.fc4(x)
+        r = self.model(states)
         return r
 
     def forward(self, traj_i, traj_j):
@@ -100,13 +97,17 @@ class CostEnsemble(CostNetwork):
 
 
 class TRexCost:
-    def __init__(self, encoder, g_dim, params):
+    def __init__(self, encoder, g_dim, params, num_nets=1):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.encoder = encoder
         self.params = params
-
-        self.cost_model = CostNetwork(g_dim, params["hidden_size"]).to(device=self.device)
-        self.cost_opt = Adam(self.cost_model.parameters(), lr=params["lr"])
+        self.num_nets = num_nets
+        if num_nets == 1:
+            self.cost_model = CostNetwork(g_dim, params["hidden_size"]).to(self.device)
+            self.cost_opt = Adam(self.cost_model.parameters(), lr=params["lr"])
+        else:
+            self.cost_models = [CostNetwork(g_dim, params["hidden_size"]).to(self.device) for _ in range(num_nets)]
+            self.cost_opts = [Adam(cost.parameters()) for cost in self.cost_models]
 
     def train(self, all_states1, all_actions1, all_states2, all_actions2, all_labels, num_epochs):
         loss_fn = nn.CrossEntropyLoss()
@@ -127,17 +128,59 @@ class TRexCost:
                 encodings1 = self.encoder(states1, actions1)
                 encodings2 = self.encoder(states2, actions2)
 
-                outputs, abs_costs = self.cost_model(encodings1, encodings2)
+                member = i % self.num_nets
+
+                if self.num_nets == 1:
+                    outputs, abs_costs = self.cost_model(encodings1, encodings2)
+                else:
+                    outputs, abs_costs = self.cost_models[member](encodings1, encodings2)
                 outputs = outputs.unsqueeze(0)
 
                 train_loss = loss_fn(outputs, 1 - label.unsqueeze(0)) + self.params["cost_reg"] * abs_costs
-
-                self.cost_opt.zero_grad()
+                
+                if self.num_nets == 1:
+                    self.cost_opt.zero_grad()
+                else:
+                    self.cost_opts[member].zero_grad()
                 train_loss.backward()
-                self.cost_opt.step()
+                if self.num_nets == 1:
+                    self.cost_opt.step()
+                else:
+                    self.cost_opts[member].step()
 
     def get_value(self, states, actions):
         with torch.no_grad():
             enc_states = self.encoder(states, actions).detach()
-            costs = self.cost_model.get_cost(enc_states)
+            if self.num_nets == 1:
+                costs = self.cost_model.get_cost(enc_states)
+            else:
+                idxs = np.random.permutation(np.arange(self.num_nets))
+                costs_split = [self.cost_models[i].get_cost(enc_states[i::self.num_nets]).squeeze() for i in idxs]
+                costs = torch.empty(states.shape[0]).to(self.device)
+                for i, idx in enumerate(idxs):
+                    costs[idx::self.num_nets] = costs_split[i]
         return costs
+
+    def get_info_gain(self, trajs, M=10, c=1.0):
+        traj_pairs = list(combinations(trajs, 2))
+        traj_pair_MIs = []
+        for traj_1, traj_2 in traj_pairs:
+            rewards_1 = np.array([model.cum_return(traj_1)[0] for model in self.cost_models])
+            reward_1_samples = np.random.normal(np.mean(rewards_1), np.std(rewards_1), M) 
+            rewards_2 = np.array([model.cum_return(traj_2)[0] for model in self.cost_models])
+            reward_2_samples = np.random.normal(np.mean(rewards_2), np.std(rewards_2), M)
+
+            p_1 = 1/(1+ np.exp(-c * (reward_1_samples - reward_2_samples)))
+            p_2 = 1 - p_1
+            h = -1 * (p_1 * np.log(p_1) + p_2 * np.log(p_2))
+
+            p_1_bar = np.mean(p_1)
+            p_2_bar = np.mean(p_2)
+            H_1 = -1 * (p_1_bar * np.log(p_1_bar) + p_2_bar * np.log(p_2_bar))
+            H_2 = np.mean(h)
+
+            MI = H_1 - H_2
+            traj_pairs_MIs.append(MI)
+
+
+

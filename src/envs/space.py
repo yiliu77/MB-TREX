@@ -10,12 +10,11 @@ from gym.spaces import Box
 from mujoco_py import load_model_from_path, MjSim
 
 
-class Maze(Env, utils.EzPickle):
-    def __init__(self, horizon, use_images, dense_rewards, max_force, goal_thresh, walls):
+class Space(Env, utils.EzPickle):
+    def __init__(self, horizon, use_images, dense_rewards, max_force, goal_thresh):
         utils.EzPickle.__init__(self)
         dirname = os.path.dirname(__file__)
-        file_stem = "assets/simple_maze.xml" if walls else "assets/empty_maze.xml"
-        filename = os.path.join(dirname, file_stem)
+        filename = os.path.join(dirname, 'assets/empty_maze.xml')
 
         self.name = "Maze{}_H{}R{}MF{}GT{}".format("1D" if use_images else "2D", horizon, int(dense_rewards), max_force, goal_thresh)
 
@@ -38,12 +37,8 @@ class Maze(Env, utils.EzPickle):
         self.gain = 10
 
         self.goal = np.zeros((2,))
-        # self.goal[0] = 0.3
-        # self.goal[1] = -0.3
-        self.goal[0] = 0.25
-        self.goal[1] = -0.25
-
-        self.walls = walls
+        self.goal[0] = 0.3
+        self.goal[1] = -0.3
 
     def get_goal(self):
         self.sim.data.qpos[0] = self.goal[0]
@@ -106,14 +101,13 @@ class Maze(Env, utils.EzPickle):
             self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
 
         self.steps = 0
-        if self.walls:
-            # Randomize wal positions
-            w1 = -0.08  # np.random.uniform(-0.2, 0.2)
-            w2 = 0.08  # np.random.uniform(-0.2, 0.2)
-            self.sim.model.geom_pos[5, 1] = 0.5 + w1
-            self.sim.model.geom_pos[7, 1] = -0.25 + w1
-            self.sim.model.geom_pos[6, 1] = 0.4 + w2
-            self.sim.model.geom_pos[8, 1] = -0.25 + w2
+        # Randomize wal positions
+        # w1 = -0.08  # np.random.uniform(-0.2, 0.2)
+        # w2 = 0.08  # np.random.uniform(-0.2, 0.2)
+        # self.sim.model.geom_pos[5, 1] = 0.5 + w1
+        # self.sim.model.geom_pos[7, 1] = -0.25 + w1
+        # self.sim.model.geom_pos[6, 1] = 0.4 + w2
+        # self.sim.model.geom_pos[8, 1] = -0.25 + w2
         self.sim.forward()
         constraint = int(self.sim.data.ncon > 3)
         if constraint and check_constraint:
@@ -123,22 +117,17 @@ class Maze(Env, utils.EzPickle):
 
     def get_expert_cost(self, states):
         costs = []
-        if self.walls:
-            for s in states:
-                d1 = (-0.15 - 0.15) ** 2 + 2 * (-0.125 - 0.125) ** 2
-                d2 = (0.15 - 0.25) ** 2 + 2 * (0.125 - (-0.25)) ** 2
+        for s in states:
+            d1 = (-0.15 - 0.15) ** 2 + 2 * (-0.125 - 0.125) ** 2
+            d2 = (0.15 - 0.25) ** 2 + 2 * (0.125 - (-0.25)) ** 2
 
-                if s[0] < -0.15:
-                    cost = (-0.15 - s[0]) ** 2 + 2 * (-0.125 - s[1]) ** 2 + d1 + d2
-                elif s[0] < 0.15:
-                    cost = (0.15 - s[0]) ** 2 + 2 * (0.125 - s[1]) ** 2 + d2
-                else:
-                    cost = (0.25 - s[0]) ** 2 + 2 * (-0.25 - s[1]) ** 2
-                costs.append(cost)
-        else:
-            for s in states:
-                cost = (s[0] - self.goal[0]) ** 2 + (s[1] - self.goal[1]) ** 2
-                costs.append(cost) 
+            if s[0] < -0.15:
+                cost = (-0.15 - s[0]) ** 2 + 2 * (-0.125 - s[1]) ** 2 + d1 + d2
+            elif s[0] < 0.15:
+                cost = (0.15 - s[0]) ** 2 + 2 * (0.125 - s[1]) ** 2 + d2
+            else:
+                cost = (0.25 - s[0]) ** 2 + 2 * (-0.25 - s[1]) ** 2
+            costs.append(cost)
 
         return np.array(costs)
 
