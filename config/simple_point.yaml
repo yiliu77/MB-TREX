@@ -1,0 +1,51 @@
+env:
+  type: "simple_point"
+  horizon: 30
+  max_force: 0.3
+
+gather_env:
+  type: "simple_point"
+  horizon: 30
+  max_force: 0.3
+
+human:
+  type: "simple_point_human"
+
+video_model:
+  type: "SVG"
+  n_past: 1
+  n_future: 8
+
+  rnn_size: 256
+  prior_rnn_layers: 1
+  posterior_rnn_layers: 1
+  predictor_rnn_layers: 2
+  enc_dim: 128
+  z_dim: 10
+
+  beta: 0.001
+  last_frame_skip: True
+
+  epochs: 150
+  batch_size: 64
+  lr: 0.002
+  train_test_split: 0.9
+  num_cores: 10
+
+visualmpc:
+  iter_per_action: 3
+  future_frames: 10
+
+cost_model:
+  enc_dim: 128
+  hidden_dim: 128
+  ensemble_size: 3
+
+  query_technique: "infogain"
+  num_generated_pairs: 30
+  query_batch_size: 40
+  batch_size: 64
+  regularization: 0.1
+
+  hidden_size: 64
+  lr: 0.002

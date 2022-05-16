@@ -176,7 +176,9 @@ class GaussianLSTM(nn.Module):
 
 
 class SVG:
-    def __init__(self, params):
+    type = "SVG"
+
+    def __init__(self, state_dim, action_dim, params):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.params = params
         self.n_past = params["n_past"]
@@ -184,14 +186,14 @@ class SVG:
         self.last_frame_skip = params["last_frame_skip"]
         self.beta = params["beta"]
 
-        self.encoder = Encoder(params["channel_dim"], params["action_dim"], params["g_dim"]).to(self.device)
-        self.decoder = Decoder(params["g_dim"], params["channel_dim"]).to(self.device)
+        self.encoder = Encoder(state_dim[2], action_dim, params["enc_dim"]).to(self.device)
+        self.decoder = Decoder(params["enc_dim"], state_dim[2]).to(self.device)
 
-        self.frame_predictor = LSTM(params["g_dim"] + params["z_dim"], params["g_dim"], params["rnn_size"],
+        self.frame_predictor = LSTM(params["enc_dim"] + params["z_dim"], params["enc_dim"], params["rnn_size"],
                                     params["predictor_rnn_layers"], params["batch_size"]).to(self.device)
-        self.prior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"], params["prior_rnn_layers"],
+        self.prior = GaussianLSTM(params["enc_dim"], params["z_dim"], params["rnn_size"], params["prior_rnn_layers"],
                                   params["batch_size"]).to(self.device)
-        self.posterior = GaussianLSTM(params["g_dim"], params["z_dim"], params["rnn_size"],
+        self.posterior = GaussianLSTM(params["enc_dim"], params["z_dim"], params["rnn_size"],
                                       params["posterior_rnn_layers"], params["batch_size"]).to(self.device)
         self.batch_size = params["batch_size"]
 
@@ -218,7 +220,14 @@ class SVG:
 
     def create_encoding(self, states, actions):
         with torch.no_grad():
-            return self.encoder(states, actions)[0].detach()
+            if len(states.shape) == 4:
+                return self.encoder(states, actions)[0].detach()  # TODO pull out action
+            elif len(states.shape) == 5:
+                reshaped_states = states.reshape(-1, states.shape[2], states.shape[3], states.shape[4])
+                reshaped_actions = actions.reshape(-1, actions.shape[2])
+                return self.encoder(reshaped_states, reshaped_actions)[0].reshape(states.shape[0], states.shape[1], -1).detach()
+            else:
+                raise NotImplementedError
 
     def predict_states(self, start_state, actions, horizon):
         with torch.no_grad():
@@ -226,11 +235,10 @@ class SVG:
             self.prior.hidden = self.prior.init_hidden()
             self.posterior.hidden = self.posterior.init_hidden()
 
-            gen_seq = []
-            gen_h = []
+            gen_seq = [start_state]
 
             x_in = start_state
-            for i in range(horizon):
+            for i in range(horizon - 1):
                 h, h_skip = self.encoder(x_in, actions[i])
                 if self.last_frame_skip or i < self.n_past:
                     h, skip = h, h_skip
@@ -240,8 +248,7 @@ class SVG:
                 h = self.frame_predictor(torch.cat([h, z_t], 1)).detach()
                 x_in = self.decoder([h, skip]).detach()
                 gen_seq.append(x_in)
-                gen_h.append(self.encoder(x_in, None))
-            return torch.stack(gen_seq), torch.stack(gen_h)
+            return torch.stack(gen_seq)
 
     def loss(self, sequences, actions):
         sequences = sequences.permute((1, 0, 4, 2, 3))
@@ -276,6 +283,33 @@ class SVG:
 
         return loss
 
+    def train_step(self, sequences, actions):
+        self.encoder.train()
+        self.decoder.train()
+        self.frame_predictor.train()
+        self.prior.train()
+        self.posterior.train()
+
+        sequences = sequences.to(self.device).float()
+        actions = actions.to(self.device).float()
+
+        self.encoder_opt.zero_grad()
+        self.decoder_opt.zero_grad()
+        self.frame_predictor_opt.zero_grad()
+        self.prior_opt.zero_grad()
+        self.posterior_opt.zero_grad()
+
+        loss = self.loss(sequences, actions)
+        loss.backward()
+
+        self.encoder_opt.step()
+        self.decoder_opt.step()
+        self.frame_predictor_opt.step()
+        self.prior_opt.step()
+        self.posterior_opt.step()
+
+        return loss.item()
+
     def train(self, num_epochs, dataset):
         train_len = int(self.params["train_test_split"] * len(dataset))
         val_len = int(len(dataset) - train_len)
@@ -295,30 +329,13 @@ class SVG:
         losses = []
         for _ in tqdm.tqdm(range(num_epochs)):
             losses = []
-            for sequences, actions, _, _ in train_loader:
-                sequences = sequences.to(self.device).float()
-                actions = actions.to(self.device).float()
+            for sequences, actions in train_loader:
+                losses.append(self.train_step(sequences, actions))
 
-                self.encoder_opt.zero_grad()
-                self.decoder_opt.zero_grad()
-                self.frame_predictor_opt.zero_grad()
-                self.prior_opt.zero_grad()
-                self.posterior_opt.zero_grad()
-
-                loss = self.loss(sequences, actions)
-                losses.append(loss.item())
-                loss.backward()
-
-                self.encoder_opt.step()
-                self.decoder_opt.step()
-                self.frame_predictor_opt.step()
-                self.prior_opt.step()
-                self.posterior_opt.step()
-
-            for _, _, full_sequences, full_actions in val_loader:
-                full_sequences = full_sequences.to("cuda").float()
-                full_actions = full_actions.to("cuda").float()
-                self.validate(full_sequences, full_actions)
+            for sequences, actions in val_loader:
+                sequences = sequences.to("cuda").float()
+                actions = actions.to("cuda").float()
+                self.validate(sequences, actions)
                 break
 
             self.encoder_scheduler.step()
@@ -400,11 +417,11 @@ class SVG:
         self.prior.batch_size = self.batch_size
         self.posterior.batch_size = self.batch_size
 
-    def save(self, directory):
+    def save(self, f):
         torch.save({
             "encoder": self.encoder,
             "decoder": self.decoder,
             "frame_predictor": self.frame_predictor,
             "prior": self.prior,
             "posterior": self.posterior
-        }, directory)
+        }, f)

@@ -1,108 +1,16 @@
 import os
+import random
 
-import numpy as np
 import torch
 import wandb
-from torch import nn
 from torch.nn import functional
 from torch.optim import Adam
-import random
 
 from models.architectures.gaussian_policy import ContGaussianPolicy
 from models.architectures.utils import polyak_update
 from models.architectures.value_networks import ContTwinQNet
 from models.replay_buffer import ReplayBuffer
-
-
-class RunningMeanStd:
-    def __init__(self, epsilon=1e-4, shape=()):
-        self.mean = np.zeros(shape, 'float64')
-        self.var = np.ones(shape, 'float64')
-        self.count = epsilon
-
-    def update(self, x):
-        batch_mean = np.mean(x, axis=0)
-        batch_var = np.var(x, axis=0)
-        batch_count = x.shape[0]
-        self.update_from_moments(batch_mean, batch_var, batch_count)
-
-    def update_from_moments(self, batch_mean, batch_var, batch_count):
-        delta = batch_mean - self.mean
-        tot_count = self.count + batch_count
-
-        new_mean = self.mean + delta * batch_count / tot_count
-        m_a = self.var * self.count
-        m_b = batch_var * batch_count
-        M2 = m_a + m_b + np.square(delta) * self.count * batch_count / (self.count + batch_count)
-        new_var = M2 / (self.count + batch_count)
-
-        new_count = batch_count + self.count
-
-        self.mean = new_mean
-        self.var = new_var
-        self.count = new_count
-
-
-class RND(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=(5, 5), stride=(2, 2)),
-            nn.SELU(),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(5, 5), stride=(2, 2)),
-            nn.SELU(),
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(3, 3), stride=(2, 2)),
-            nn.SELU(),
-            nn.Flatten(),
-            nn.Linear(2304, 512),
-            nn.SELU(),
-            nn.Linear(512, 256),
-            nn.SELU(),
-            nn.Linear(256, 256)
-        )
-
-        for p in self.modules():
-            if isinstance(p, nn.Conv2d):
-                nn.init.orthogonal_(p.weight, np.sqrt(2))
-                p.bias.data.zero_()
-
-            if isinstance(p, nn.Linear):
-                nn.init.orthogonal_(p.weight, np.sqrt(2))
-                p.bias.data.zero_()
-
-    def forward(self, x):
-        x = x.permute(0, 3, 1, 2)
-        return self.model(x)
-
-
-class RNDTarget(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=(5, 5), stride=(2, 2)),
-            nn.SELU(),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(5, 5), stride=(2, 2)),
-            nn.SELU(),
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(3, 3), stride=(2, 2)),
-            nn.SELU(),
-            nn.Flatten(),
-            nn.Linear(2304, 512),
-            nn.SELU(),
-            nn.Linear(512, 256)
-        )
-
-        for p in self.modules():
-            if isinstance(p, nn.Conv2d):
-                nn.init.orthogonal_(p.weight, np.sqrt(2))
-                p.bias.data.zero_()
-
-            if isinstance(p, nn.Linear):
-                nn.init.orthogonal_(p.weight, np.sqrt(2))
-                p.bias.data.zero_()
-
-    def forward(self, x):
-        x = x.permute(0, 3, 1, 2)
-        return self.model(x)
+from models.rnd import *
 
 
 class ContSAC:
@@ -168,7 +76,7 @@ class ContSAC:
         if not torch.is_tensor(states):
             states = torch.as_tensor(states, dtype=torch.float32).to(self.device)
             actions = torch.as_tensor(actions, dtype=torch.float32).to(self.device)
-            rewards = torch.as_tensor(rewards[:, np.newaxis], dtype=torch.float32).to(self.device)
+            # rewards = torch.as_tensor(rewards[:, np.newaxis], dtype=torch.float32).to(self.device)
             rewards_in = torch.as_tensor(rewards_in[:, np.newaxis], dtype=torch.float32).to(self.device)
             next_states = torch.as_tensor(next_states, dtype=torch.float32).to(self.device)
             next_normalized_states = torch.as_tensor(next_normalized_states, dtype=torch.float32).to(self.device)
@@ -178,7 +86,7 @@ class ContSAC:
             next_actions, next_log_probs, _ = self.policy.sample(next_states)
             next_q = self.target_twin_q(next_states, next_actions)[0]
             v = next_q - self.alpha * next_log_probs
-            expected_q = rewards_in + done_masks * self.gamma * v # 3, 10, 20
+            expected_q = rewards_in + done_masks * self.gamma * v  # 3, 10, 20
 
         # Q backprop
         q_val, pred_q1, pred_q2 = self.twin_q(states, actions)
@@ -223,13 +131,14 @@ class ContSAC:
                   'Loss/Q Loss': q_loss.item(),
                   'Stats/Avg Q Val': q_val.mean().item(),
                   'Stats/Avg Q Next Val': next_q.mean().item(),
-                  'Stats/Avg Alpha': self.alpha.item() if self.ent_adj else self.alpha}
-        losses["Loss/Forward Loss"] = forward_loss.item()
+                  'Stats/Avg Alpha': self.alpha.item() if self.ent_adj else self.alpha,
+                  "Loss/Forward Loss": forward_loss.item()}
         return losses
 
     def train(self, num_games, deterministic=False):
         all_states = []
         all_actions = []
+        all_lengths = []
 
         self.policy.train()
         self.twin_q.train()
@@ -265,64 +174,40 @@ class ContSAC:
 
             mean, std, count = np.mean(reward_ins), np.std(reward_ins), len(reward_ins)
             self.reward_normalization.update_from_moments(mean, std ** 2, count)
-            reward_ins = (np.array(reward_ins) - self.reward_normalization.mean) / np.sqrt(self.reward_normalization.var)
+            reward_ins = np.array(reward_ins) / np.sqrt(self.reward_normalization.var)
             if i > self.warmup_games:
                 for point in zip(states, actions, rewards, reward_ins, next_states, done_masks):
                     self.memory.add(*point)
 
             states = np.array(states)
             all_states.append(states)
-            all_actions.append(actions)
+            all_actions.append(np.array(actions))
+            all_lengths.append(len(states))
 
             self.normalization.update(states)
 
             if i % 10 == 0:
                 gen_images = wandb.Image(np.reshape(states, (states.shape[0] * states.shape[1], states.shape[2], states.shape[3])), caption="Sequences")
-
-                x_bounds = [-0.3, 0.3]
-                y_bounds = [-0.3, 0.3]
-
-                obs_states, actions = [], []
-                x_pts = 64
-                y_pts = int(x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
-                for y in np.linspace(x_bounds[0], x_bounds[1], y_pts):
-                    for x in np.linspace(y_bounds[0], y_bounds[1], x_pts):
-                        obs = self.env.reset(pos=(x, y))
-                        obs_states.append(obs)
-
-                # from matplotlib import pyplot as plt
-                # plt.imshow(self.env.reset(pos=(0.21, 0)))
-                # plt.show()
+                # x_bounds = [-0.3, 0.3]
+                # y_bounds = [-0.3, 0.3]
                 #
-                # obs = ((self.env.reset(pos=(0.21, 0))[np.newaxis, :] - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8)
-                # rnd_val = self.rnd(torch.as_tensor(obs).float().to(self.device)).detach().cpu().numpy()
-                # rnd_target_val = self.rnd_target(torch.as_tensor(obs).float().to(self.device)).detach().cpu().numpy()
-                # print(self.calc_reward_in(obs), np.mean(rnd_val), np.min(rnd_val), np.max(rnd_val))
-                # print(self.calc_reward_in(obs), np.mean(rnd_target_val), np.min(rnd_target_val), np.max(rnd_target_val))
-                # plt.imshow(obs[0])
-                # plt.show()
-                # print(np.mean(obs[0]), np.max(obs[0]), np.min(obs[0]), np.var(obs[0]), np.median(obs[0]))
+                # obs_states, actions = [], []
+                # x_pts = 64
+                # y_pts = 64
+                # for y in np.linspace(x_bounds[0], x_bounds[1], y_pts):
+                #     for x in np.linspace(y_bounds[0], y_bounds[1], x_pts):
+                #         obs = self.env.reset(pos=(x, y))
+                #         obs_states.append(obs)
                 #
-                # plt.imshow(self.env.reset(pos=(0.0, 0)))
-                # plt.show()
-                # obs = ((self.env.reset(pos=(0.0, 0))[np.newaxis, :] - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8)
-                # rnd_val = self.rnd(torch.as_tensor(obs).float().to(self.device)).detach().cpu().numpy()
-                # rnd_target_val = self.rnd_target(torch.as_tensor(obs).float().to(self.device)).detach().cpu().numpy()
-                # print(self.calc_reward_in(obs), np.mean(rnd_val), np.min(rnd_val), np.max(rnd_val))
-                # print(self.calc_reward_in(obs), np.mean(rnd_target_val), np.min(rnd_target_val), np.max(rnd_target_val))
-                # plt.imshow(obs[0])
-                # plt.show()
-                # print(np.mean(obs[0]), np.max(obs[0]), np.min(obs[0]), np.var(obs[0]), np.median(obs[0]))
-
-                obs_states = np.array(obs_states)
-                obs_states = ((obs_states - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8)
-                obs_states = torch.as_tensor(obs_states).float().to("cuda")
-                costs = self.calc_reward_in(obs_states)
-                grid = costs.reshape(y_pts, x_pts) / np.max(costs)
-                grid_image = wandb.Image(grid[:, :, None] * 255 * 0.8 + 0.2 * self.env.reset(), caption="RND")
-                avg_images = wandb.Image(np.array(self.normalization.mean[0, :, :, :]), caption="Avg")
-                traverse_images = wandb.Image(np.max(states, axis=0), caption="Traverse")
-                wandb.log({"Sequences": gen_images, "RND": grid_image, "Avg": avg_images, "Traverse": traverse_images})
+                # obs_states = np.array(obs_states)
+                # obs_states = ((obs_states - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8)
+                # obs_states = torch.as_tensor(obs_states).float().to("cuda")
+                # costs = self.calc_reward_in(obs_states)
+                # grid = costs.reshape(y_pts, x_pts) / np.max(costs)
+                # grid_image = wandb.Image(grid[:, :, None] * 255 * 0.8 + 0.2 * self.env.reset(), caption="RND")
+                # avg_images = wandb.Image(np.array(self.normalization.mean[0, :, :, :]), caption="Avg")
+                # traverse_images = wandb.Image(np.max(states, axis=0), caption="Traverse")
+                wandb.log({"Sequences": gen_images})
 
             if i >= 2 * self.warmup_games:
                 if i % self.n_games_til_train == 0:
@@ -337,7 +222,12 @@ class ContSAC:
                             wandb.log(train_info)
 
             print("index: {}, steps: {}, total_rewards: {}".format(i, n_steps, total_reward))
-        return np.array(all_states), np.array(all_actions)
+        padded_all_states = np.zeros((len(all_states), np.max(all_lengths), all_states[0].shape[1], all_states[0].shape[2], all_states[0].shape[3]))
+        padded_all_actions = np.zeros((len(all_actions), np.max(all_lengths), all_actions[0].shape[1]))
+        for i in range(len(padded_all_states)):
+            padded_all_states[i, :len(all_states[i]), :, :, :] = all_states[i]
+            padded_all_actions[i, :len(all_actions[i]), :] = all_actions[i]
+        return padded_all_states, padded_all_actions, np.array(all_lengths)
 
     def eval(self, num_games, render=True):
         self.policy.eval()

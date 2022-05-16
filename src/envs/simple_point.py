@@ -1,39 +1,37 @@
 import os
 
+import torch
+from matplotlib import pyplot as plt
 import cv2
 import numpy as np
-import torch
 from gym import Env
 from gym import utils
 from gym.spaces import Box
-from matplotlib import pyplot as plt
 from mujoco_py import load_model_from_path, MjSim
 
 
-class Maze(Env, utils.EzPickle):
-    def __init__(self, horizon, start, max_force):
+class SimplePoint(Env, utils.EzPickle):
+    def __init__(self, horizon, max_force):
         utils.EzPickle.__init__(self)
         dirname = os.path.dirname(__file__)
-        filename = os.path.join(dirname, 'assets/simple_maze.xml')
+        filename = os.path.join(dirname, 'assets/simple_point.xml')
 
-        self.name = "Maze_H{}MF{}".format(horizon, max_force)
+        self.name = "MazeH{}_MF{}".format(horizon, max_force)
 
         self.sim = MjSim(load_model_from_path(filename))
         self.horizon = horizon
         self._max_episode_steps = self.horizon
 
         self.max_force = max_force
-        self.start = start
 
         self.observation_space = self._get_obs().shape
         self.action_space = Box(-max_force * np.ones(2), max_force * np.ones(2))
 
         self.steps = 0
-        self.gain = 10
 
         self.goal = np.zeros((2,))
-        self.goal[0] = 0.3
-        self.goal[1] = -0.3
+        self.goal[0] = -0.1
+        self.goal[1] = -0.25
 
     def get_goal(self):
         self.sim.data.qpos[0] = self.goal[0]
@@ -72,45 +70,21 @@ class Maze(Env, utils.EzPickle):
         rendered_img[rendered_img[:, :, 0] > 200] = [255, 0, 0]
         return rendered_img
 
-    def reset(self, check_constraint=True, pos=()):
-        pos = tuple(pos)
-        if len(pos):
+    def reset(self, pos=None):
+        if pos is None:
+            self.sim.data.qpos[0] = np.random.uniform(-0.2, 0.2)
+            self.sim.data.qpos[1] = np.random.uniform(-0.2, 0.2)
+        else:
             self.sim.data.qpos[0] = pos[0]
             self.sim.data.qpos[1] = pos[1]
-        else:
-            if self.start == "anywhere":
-                self.sim.data.qpos[0] = np.random.uniform(-0.3, 0.3)
-                self.sim.data.qpos[1] = np.random.uniform(-0.3, 0.3)
-            elif self.start == "left":
-                self.sim.data.qpos[0] = np.random.uniform(-0.3, -0.1)
-                self.sim.data.qpos[1] = np.random.uniform(-0.25, 0.25)
-            elif self.start == 'fixed':
-                self.sim.data.qpos[0] = -0.2
-                self.sim.data.qpos[1] = -0.2
-            else:
-                raise NotImplementedError
+        self.sim.forward()
 
         self.steps = 0
-        # Randomize wal positions
-        w1 = -0.08  # np.random.uniform(-0.2, 0.2)
-        w2 = 0.08  # np.random.uniform(-0.2, 0.2)
-        self.sim.model.geom_pos[5, 1] = 0.5 + w1
-        self.sim.model.geom_pos[7, 1] = -0.25 + w1
-        self.sim.model.geom_pos[6, 1] = 0.4 + w2
-        self.sim.model.geom_pos[8, 1] = -0.25 + w2
-        self.sim.forward()
-        constraint = int(self.sim.data.ncon > 3)
-        if constraint and check_constraint:
-            if not len(pos):
-                return self.reset(check_constraint=check_constraint)
         return self._get_obs()
 
     def get_distance_score(self):
         d = np.sqrt(np.mean((self.goal - self.sim.data.qpos[:]) ** 2))
         return d
-
-    def render(self, mode="human"):
-        raise NotImplementedError
 
     def visualize_rewards(self, filename, cost_model):
         x_bounds = [-0.25, 0.25]
@@ -139,3 +113,6 @@ class Maze(Env, utils.EzPickle):
         plt.colorbar()
         plt.savefig(filename, bbox_inches='tight')
         plt.close()
+
+    def render(self, mode="human"):
+        raise NotImplementedError
