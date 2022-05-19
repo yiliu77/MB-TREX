@@ -11,7 +11,7 @@ human:
 
 video_model:
   type: "SVG"
-  n_past: 1
+  n_past: 3
   n_future: 10
 
   rnn_size: 256
@@ -24,7 +24,7 @@ video_model:
   beta: 0.001
   last_frame_skip: True
 
-  epochs: 200
+  epochs: 500
   batch_size: 64
   lr: 0.002
   train_test_split: 0.9

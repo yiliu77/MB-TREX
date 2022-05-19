@@ -58,7 +58,7 @@ if __name__ == "__main__":
         os.makedirs("saved/{}/TREX/reward_visualization/".format(params["env"]["type"]))
     env.visualize_rewards("saved/{}/TREX/reward_visualization/initial.png".format(params["env"]["type"]), cost_model)
 
-    with h5py.File("saved/{}/data/transition_data6.hdf5".format(params["env"]["type"]), 'r') as f:
+    with h5py.File("saved/{}/data/transition_data1.hdf5".format(params["env"]["type"]), 'r') as f:
         all_states = np.array(f['images'])
         all_actions = np.array(f['actions'])
     print(all_actions.shape, all_states.shape, np.max(all_states), np.min(all_states))

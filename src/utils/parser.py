@@ -3,6 +3,7 @@ from human.simple_point_human import SimplePointHuman
 from envs.maze import Maze
 from human.maze_human import MazeHuman
 from envs.hopper import Hopper
+from human.hopper_human import HopperHuman
 
 
 def create_env(params):
@@ -19,7 +20,9 @@ def create_env(params):
 def create_human(params, env):
     if params["type"] == "simple_point_human":
         return SimplePointHuman(env)
-    if params["type"] == "maze_human":
+    elif params["type"] == "maze_human":
         return MazeHuman(env)
+    elif params["type"] == "hopper_human":
+        return HopperHuman(env)
     else:
         raise NotImplementedError

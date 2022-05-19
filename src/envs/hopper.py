@@ -47,3 +47,6 @@ class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
         )
         self.set_state(qpos, qvel)
         return self._get_obs()
+
+    def visualize_rewards(self, path, model):
+        pass

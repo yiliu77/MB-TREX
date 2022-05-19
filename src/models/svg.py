@@ -203,11 +203,11 @@ class SVG:
         self.prior_opt = optim.Adam(self.prior.parameters(), lr=params["lr"])
         self.posterior_opt = optim.Adam(self.posterior.parameters(), lr=params["lr"])
 
-        self.encoder_scheduler = ExponentialLR(self.encoder_opt, gamma=0.99)
-        self.decoder_scheduler = ExponentialLR(self.decoder_opt, gamma=0.99)
-        self.frame_predictor_scheduler = ExponentialLR(self.frame_predictor_opt, gamma=0.99)
-        self.prior_scheduler = ExponentialLR(self.prior_opt, gamma=0.99)
-        self.posterior_scheduler = ExponentialLR(self.posterior_opt, gamma=0.99)
+        self.encoder_scheduler = ExponentialLR(self.encoder_opt, gamma=0.999)
+        self.decoder_scheduler = ExponentialLR(self.decoder_opt, gamma=0.999)
+        self.frame_predictor_scheduler = ExponentialLR(self.frame_predictor_opt, gamma=0.999)
+        self.prior_scheduler = ExponentialLR(self.prior_opt, gamma=0.999)
+        self.posterior_scheduler = ExponentialLR(self.posterior_opt, gamma=0.999)
 
         self.rec_loss = nn.MSELoss()
 
