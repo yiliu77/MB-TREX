@@ -1,9 +1,11 @@
 env:
   type: "hopper"
+  horizon: 40
   dims: [64, 64]
 
 gather_env:
   type: "hopper"
+  horizon: 40
   dims: [64, 64]
 
 human:
@@ -12,7 +14,7 @@ human:
 video_model:
   type: "SVG"
   n_past: 3
-  n_future: 10
+  n_future: 22
 
   rnn_size: 256
   prior_rnn_layers: 1
@@ -24,7 +26,7 @@ video_model:
   beta: 0.001
   last_frame_skip: True
 
-  epochs: 500
+  epochs: 140
   batch_size: 64
   lr: 0.002
   train_test_split: 0.9
@@ -32,7 +34,7 @@ video_model:
 
 visualmpc:
   iter_per_action: 5
-  future_frames: 7
+  future_frames: 25
 
 cost_model:
   enc_dim: 128

@@ -1,3 +1,4 @@
 src/wandb/
 src/saved/
 .idea/
+*.pyc
