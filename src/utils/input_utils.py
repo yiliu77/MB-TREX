@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 
-def create_pref_validation(all_states, human, device='cuda', samples=400):
+def create_pref_validation(all_states, human, device='cuda', samples=10):
     # Create validation set
     pref_states1_batch, pref_states2_batch, pref_actions1_batch, pref_actions2_batch, pref_labels_batch = [], [], [], [], []
 

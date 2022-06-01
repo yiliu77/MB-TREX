@@ -59,10 +59,10 @@ if __name__ == "__main__":
 
     model = SVG(env.observation_space, env.action_space.shape[0], params["video_model"])
     video_dir_name = f"./saved/{params['env']['type']}/{model.type}/"
-    model.load(video_dir_name + "svg.pt")  # TODO  remove
+    # model.load(video_dir_name + "svg.pt")  # TODO  remove
 
     create_virtual_dataset("saved/{}/data/".format(params["env"]["type"]))
-    dataset = SimplePointDataset("saved/{}/data/virtual_transition_data.h5".format(params["env"]["type"]), params["video_model"]["n_past"] + params["video_model"]["n_future"])
+    dataset = SimplePointDataset("saved/{}/data/virtual_transition_data.h5".format(params["env"]["type"]), params["video_model"]["n_past"], params["video_model"]["n_future"])
 
     # Model directory
     dir_name = f"./saved/{params['env']['type']}/{model.type}/"

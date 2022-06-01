@@ -58,7 +58,7 @@ if __name__ == "__main__":
         os.makedirs("saved/{}/TREX/reward_visualization/".format(params["env"]["type"]))
     env.visualize_rewards("saved/{}/TREX/reward_visualization/initial.png".format(params["env"]["type"]), cost_model)
 
-    with h5py.File("saved/{}/data/transition_data1.hdf5".format(params["env"]["type"]), 'r') as f:
+    with h5py.File("saved/{}/data/transition_data2.hdf5".format(params["env"]["type"]), 'r') as f:
         all_states = np.array(f['images'])
         all_actions = np.array(f['actions'])
     print(all_actions.shape, all_states.shape, np.max(all_states), np.min(all_states))
@@ -79,15 +79,16 @@ if __name__ == "__main__":
     for iteration in range(1000):
         traj_states = []
         avg_rewards = []
-        for _ in range(3):
-            wandb.log({"VisualMPC/RND Visualization": visualize_rnd(env, visualmpc.rnd, visualmpc.rnd_target, visualmpc.normalization),
+        for _ in range(3): # TODO
+            wandb.log({# "VisualMPC/RND Visualization": visualize_rnd(env, visualmpc.rnd, visualmpc.rnd_target, visualmpc.normalization),
                        "VisualMPC/Normalization": wandb.Image(visualmpc.normalization.mean[0])})
             states, actions = [], []
             state, done, t = env.reset(), False, 0
             while not done:
                 action, query_states_list = visualmpc.act(state, t)
+                start = time.time()
                 next_state, reward, done, info = env.step(action)
-                print(action, t, reward)
+                print(t, action, reward)
                 states.append(state)
                 actions.append(action)
                 avg_rewards.append(reward)
@@ -97,6 +98,10 @@ if __name__ == "__main__":
                 if t % params["visualmpc"]["future_frames"] == 0:
                     for query_states in query_states_list:
                         all_query_states = np.concatenate([all_query_states, query_states[:, None, :, :, :]], axis=1)
+
+            states = np.array(states)
+            all_trajectory_imgs = wandb.Image(np.reshape(states, (states.shape[0] * states.shape[1], states.shape[2], states.shape[3])), caption="Sequences")
+            wandb.log({"All Trajectories": all_trajectory_imgs})
             traj_states.append(np.max(np.stack(states), axis=0))
             mpc_states.append(states)
             mpc_actions.append(actions)

@@ -211,7 +211,7 @@ class TREX:
                                 log_results["Pref{}/Pref_Train_Accuracy".format(i)] = train_accuracy
                                 avg_results["Avg_Pref_Train_Accuracy"] += train_accuracy
 
-                            indices = np.random.choice(range(test_pref_states1.shape[1]), size=min(self.params["batch_size"], len(test_pref_states1)), replace=False)
+                            indices = np.random.choice(range(test_pref_states1.shape[1]), size=min(self.params["batch_size"], test_pref_states1.shape[1]))
                             test_pref_states1_batch = test_pref_states1[:, indices, ...]
                             test_pref_states2_batch = test_pref_states2[:, indices, ...]
                             test_pref_labels_batch = test_pref_labels[indices].detach().cpu().numpy()

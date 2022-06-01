@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -229,17 +231,22 @@ class SVG:
             else:
                 raise NotImplementedError
 
-    def predict_states(self, start_state, actions, horizon):
+    def predict_states(self, start_states, actions, horizon):
+        assert len(start_states) == self.n_past
         with torch.no_grad():
             self.frame_predictor.hidden = self.frame_predictor.init_hidden()
             self.prior.hidden = self.prior.init_hidden()
             self.posterior.hidden = self.posterior.init_hidden()
 
-            gen_seq = [start_state]
+            gen_seq = copy.deepcopy(start_states) # TODO fix actions being too short (n_past actions are actually n_future)
 
-            x_in = start_state
+            x_in = None
             for i in range(horizon - 1):
-                h, h_skip = self.encoder(x_in, actions[i])
+                if i < self.n_past:
+                    h, h_skip = self.encoder(start_states[i], actions[i])
+                else:
+                    h, h_skip = self.encoder(x_in, actions[i])
+
                 if self.last_frame_skip or i < self.n_past:
                     h, skip = h, h_skip
                 else:

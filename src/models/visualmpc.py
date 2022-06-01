@@ -34,11 +34,13 @@ class VisualMPC:
         self.max_rnd_coeff = 2.0
         self.min_rnd_coeff = 0.0
 
+        self.past_segments = []
         self.past_states = []
+        self.past_actions = []
 
     def act(self, obs, t=0, evaluate=False):
-        if t == 0 and len(self.past_states) != 0:
-            past_states = torch.as_tensor(np.concatenate(self.past_states, axis=0)).float().to(self.device)
+        if t == 0 and len(self.past_segments) != 0:
+            past_states = torch.as_tensor(np.concatenate(self.past_segments, axis=0)).float().to(self.device)
             normalized_states = ((past_states - torch.as_tensor(self.normalization.mean).float().to(self.device)) /
                                  torch.as_tensor(np.sqrt(self.normalization.var)).float().to(self.device)).clip(-8, 8).detach()
             losses = []
@@ -53,7 +55,7 @@ class VisualMPC:
                 self.rnd_opt.step()
                 losses.append(forward_loss.item())
             wandb.log({"VisualMPC/RNDLoss": np.mean(losses)})
-            self.past_states = []
+            self.past_segments = []
 
             self.rnd_counter += 1
 
@@ -61,7 +63,11 @@ class VisualMPC:
         with torch.no_grad():
             obs = torch.as_tensor(obs / 255).to(self.device).float()
             obs = obs.permute((2, 0, 1)).unsqueeze(0)
-            curr_states = obs.repeat(self.sample_size, 1, 1, 1)
+            if t == 0:
+                self.past_states = [obs.repeat(self.sample_size, 1, 1, 1)] * 3
+                self.past_actions = [np.zeros_like(self.env.action_space.sample())] * 2
+            self.past_states.append(obs.repeat(self.sample_size, 1, 1, 1))
+            self.past_states.pop(0)
             self.video_prediction.encoder.eval()
 
             action_samples = []
@@ -80,7 +86,8 @@ class VisualMPC:
             prev_rnd_rew_normalization = copy.deepcopy(self.rnd_rew_normalization)
             # prev_cost_normalization = copy.deepcopy(self.cost_normalization)
             for itr in range(self.params["iter_per_action"]):
-                trajectory = self.video_prediction.predict_states(curr_states, action_samples, self.params["future_frames"])[:self.params["future_frames"]]
+                all_actions = torch.cat([torch.as_tensor(np.array(self.past_actions)).to(self.device).unsqueeze(1).repeat(1, self.sample_size, 1), action_samples], dim=0)
+                trajectory = self.video_prediction.predict_states(self.past_states, all_actions, self.params["future_frames"])[:self.params["future_frames"]]
 
                 # Calculate cost and rnd rewards
                 traj_cost = self.cost_fn(trajectory)
@@ -99,8 +106,8 @@ class VisualMPC:
                 normalized_rnd_rewards = rnd_rewards / torch.as_tensor(np.sqrt(prev_rnd_rew_normalization.var)).float().to(self.device)
                 rnd_coeff = max(self.min_rnd_coeff, self.max_rnd_coeff - self.rnd_counter * (self.max_rnd_coeff - self.min_rnd_coeff) / self.rnd_iteration)
                 costs = normalized_traj_cost - (rnd_coeff * normalized_rnd_rewards if not evaluate else 0)
-                wandb.log({"VisualMPC/RND Rewards": torch.mean(normalized_rnd_rewards).item(), "VisualMPC/Traj Costs": torch.mean(normalized_traj_cost).item(),
-                           "VisualMPC/RND Coeff": rnd_coeff, "VisualMPC/Combined Cost": torch.mean(costs).item()})
+                # wandb.log({"VisualMPC/RND Rewards": torch.mean(normalized_rnd_rewards).item(), "VisualMPC/Traj Costs": torch.mean(normalized_traj_cost).item(),
+                #            "VisualMPC/RND Coeff": rnd_coeff, "VisualMPC/Combined Cost": torch.mean(costs).item()})
 
                 # Update normalization
                 rnd_rewards_np = rnd_rewards.cpu().numpy()
@@ -128,7 +135,8 @@ class VisualMPC:
                     max=self.env.action_space.high[0])
 
             action = mean[0][0]
-            mean_trajectory = self.video_prediction.predict_states(curr_states, mean, self.horizon)[:self.params["future_frames"], 0, ...]
+            all_actions = torch.cat([torch.as_tensor(np.array(self.past_actions)).to(self.device).unsqueeze(1).repeat(1, self.sample_size, 1), mean], dim=0)
+            mean_trajectory = self.video_prediction.predict_states(self.past_states, all_actions, self.horizon)[:self.params["future_frames"], 0, ...]
             mean_trajectory_np = mean_trajectory.detach().cpu().numpy()
 
             visualized_traj = torch.stack(average_trajectories, dim=0)
@@ -136,11 +144,13 @@ class VisualMPC:
             visualized_traj = visualized_traj.permute((0, 2, 1, 3, 4))
             visualized_traj = visualized_traj.reshape(visualized_traj.shape[0] * visualized_traj.shape[1], visualized_traj.shape[2] * visualized_traj.shape[3], visualized_traj.shape[4])
             traj_images = wandb.Image(visualized_traj.detach().cpu().numpy(), caption="Sequences")
-            avg_images = wandb.Image(np.mean(mean_trajectory_np, axis=0).transpose((1, 2, 0)), caption="Sequences")
+            avg_images = wandb.Image(np.transpose(mean_trajectory_np, (0, 2, 3, 1)).reshape(-1, mean_trajectory_np.shape[3], mean_trajectory_np.shape[1]), caption="Sequences")
             wandb.log({"VisualMPC/Gen_Traj": traj_images,
                        "VisualMPC/Mean_Traj": avg_images})
 
-            self.past_states.append(np.transpose(mean_trajectory_np, (0, 2, 3, 1)))
+            self.past_segments.append(np.transpose(mean_trajectory_np, (0, 2, 3, 1)))
 
         query_states_list.append(mean_trajectory_np)
+        self.past_actions.append(action.detach().cpu().numpy())
+        self.past_actions.pop(0)
         return action.detach().cpu().numpy(), query_states_list
