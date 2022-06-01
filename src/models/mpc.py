@@ -70,22 +70,9 @@ class MPC:
 
     def compile_cost(self, acs, member):
         # acs.shape = [CEM pop size, traj_length, action_dim]
-        # states = torch.tile(self.obs, (1, acs.shape[0], 1))
-        # costs = []
-        # for ac in acs.view(acs.shape[1], acs.shape[0], acs.shape[2]):
-        #     obs = states[-1]
-        #     if self.ensemble:
-        #         cost = self.trex_cost.get_value(obs, ac).detach().cpu().numpy()[member]
-        #     else:
-        #         cost = self.trex_cost.get_value(obs, ac).detach().cpu().numpy()
-        #     costs.append(cost)
-        #     next_obs = self.dyn_prediction(torch.cat((obs, ac), dim=1))
-        #     states = torch.cat((states, torch.unsqueeze(next_obs, dim=0)), dim=0)
-        # costs = self.torchify(costs)
-        # return torch.sum(costs, dim=0).squeeze(), states
         states = self.predict_trajectories(self.obs, acs)[:, :-1, :]
         states_lst = states.reshape(self.cem_pop_size * self.horizon, -1)
-        costs = self.trex_cost.get_value(states_lst, acs.view(-1, self.action_dim)).reshape(self.cem_pop_size, self.horizon).sum(dim=1)
+        costs = self.trex_cost.get_value(states_lst, self.torchify(acs.view(-1, self.action_dim))).reshape(self.cem_pop_size, self.horizon).sum(dim=1)
         costs -= self.rnd_weight * self.rnd_cost(states_lst)
         return costs, states
 

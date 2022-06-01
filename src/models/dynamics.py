@@ -12,11 +12,13 @@ class PtModel(nn.Module):
     def __init__(self, state_size, action_size, lr=0.001):
         super().__init__()
 
+        self.state_dim = state_size
+        self.action_dim = action_size
         in_features = state_size + action_size
-        out_features = action_size
+        out_features = state_size
         self.in_features = in_features
         self.out_features = out_features
-        hidden_size = 200
+        hidden_size = 400
 
         self.fc0 = nn.Linear(in_features, hidden_size)
         # nn.init.trunc_normal_(self.fc0.weight, std=1.0 / (2.0 * np.sqrt(in_features)))
@@ -40,9 +42,9 @@ class PtModel(nn.Module):
                 layer.bias = nn.Parameter(torch.zeros(1, layer.out_features, dtype=torch.float32))
     
         self.inputs_mu = nn.Parameter(
-            torch.zeros(in_features), requires_grad=False)
+            torch.zeros(1, in_features), requires_grad=False)
         self.inputs_sigma = nn.Parameter(
-            torch.zeros(in_features), requires_grad=False)
+            torch.zeros(1, in_features), requires_grad=False)
 
         self.optim = torch.optim.Adam(self.parameters(), lr=lr) # eps=1e-4
 
@@ -66,38 +68,36 @@ class PtModel(nn.Module):
 
     def forward(self, inputs):
         # Transform inputs
-        # x = (inputs - self.inputs_mu) / self.inputs_sigma
-        x = inputs
+        x = (inputs - self.inputs_mu) / self.inputs_sigma
         x = swish(self.fc0(x))
         x = swish(self.fc1(x))
         x = swish(self.fc2(x))
         x = self.fc3(x)
 
-        return x + inputs[:, :2]
+        return x * self.inputs_sigma[:, self.state_dim] + self.inputs_mu[:, :self.state_dim] + inputs[:, :self.state_dim]
 
-    def train_dynamics(self, data, epochs, batch_size=32, val_split=0.9, patience=100, update_stats=True):
+    def train_dynamics(self, observations, actions, epochs, batch_size=32, val_split=0.9, patience=100, update_stats=True):
         # data = [[S, A, S'] * len(data) ]
-        split = int(val_split * len(data))
-        
-        train_data = data[:split]
-        train_in = np.concatenate((train_data[:, 0], train_data[:, 1]), axis=1)
+        split = int(val_split * len(actions))
+
+        train_in = np.concatenate((observations[:split], actions[:split]), axis=1)
         self.train_in = torch.from_numpy(train_in).to(TORCH_DEVICE).float()
-        self.train_out = torch.from_numpy(train_data[:, 2]).to(TORCH_DEVICE).float()
+        self.train_out = torch.from_numpy(observations[1:split+1]).to(TORCH_DEVICE).float()
         if update_stats:
             self.fit_input_stats(train_in)
 
-        val_data = data[split:]
-        val_in = torch.from_numpy(np.concatenate((val_data[:, 0], val_data[:, 1]), axis=1)).to(TORCH_DEVICE).float()
-        val_out = torch.from_numpy(val_data[:, 2]).to(TORCH_DEVICE).float()
+        val_in = np.concatenate((observations[split:-1], actions[split:]), axis=1)
+        val_in = torch.from_numpy(val_in).to(TORCH_DEVICE).float()
+        val_out = torch.from_numpy(observations[split+1:]).to(TORCH_DEVICE).float()
         
-        num_batches = len(train_data) // batch_size + 1
+        num_batches = split // batch_size + 1
         loss_fn = torch.nn.MSELoss()
         epoch_range = trange(epochs, unit="epoch(s)", desc="Network training")
         k = 0
         val_losses = []
         best_params = self.parameters()
         for _ in epoch_range:
-            idx = np.random.permutation(len(train_data))
+            idx = np.random.permutation(split)
             for i in range(num_batches):
                 batch_idx = idx[i * batch_size: (i + 1) * batch_size]
 

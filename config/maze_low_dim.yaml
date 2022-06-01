@@ -1,0 +1,40 @@
+env:
+  type: "maze"
+  horizon: 30
+  use_images: False
+  dense_rewards: True
+  max_force: 2
+  goal_thresh: 0.05
+  walls: True
+  state_dim: 2
+  action_dim: 2
+
+dynamics_model:
+  num_dynamics_iters: 1000
+  gt_dynamics: False
+  epochs: 50
+  batch_size: 32
+  lr: 0.001
+  train_test_split: 0.9
+  num_cores: 10
+  online_update_freq: 100000
+  use_cached: False
+
+cost_model:
+  hidden_size: 512
+  cost_reg: 0.0
+  lr: 0.0002
+  use_images: False
+  episodes: 200
+  offline_demos: 2
+  bc_comp_mode: "same"
+  bc_warm_start: True
+  pretrain_epochs: 10
+  state_only: True
+
+mpc:
+  cem_iters: 5
+  cem_pop_size: 200
+  cem_elites: 20
+  ensemble: False
+  rnd_weight: 0.1

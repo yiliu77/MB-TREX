@@ -183,4 +183,15 @@ class TRexCost:
             traj_pairs_MIs.append(MI)
 
 
+class GTCost:
+    def __init__(self, env):
+        self.env = env
 
+    def get_value(self, states, actions):
+        device = states.device
+        states = states.detach().cpu().numpy()
+        actions = actions.detach().cpu().numpy()
+        return torch.from_numpy(self.env.get_expert_cost(states, actions)).to(device)
+    
+    def train(self, *args):
+        pass

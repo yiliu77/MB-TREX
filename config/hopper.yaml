@@ -1,0 +1,38 @@
+env:
+  type: "hopper"
+  horizon: 60
+  use_images: False
+  dense_rewards: True
+  max_force: 2
+  goal_thresh: 0.0
+  dims: [100, 100]
+  state_dim: 11
+  action_dim: 3
+
+dynamics_model:
+  num_dynamics_iters: 200000
+  gt_dynamics: False
+  epochs: 100
+  batch_size: 32
+  lr: 0.0005
+  train_test_split: 0.9
+  num_cores: 10
+  online_update_freq: 10000
+  use_cached: False
+mpc:
+  cem_iters: 5
+  cem_pop_size: 200
+  cem_elites: 20
+  ensemble: False
+  rnd_weight: 0.0
+cost_model:
+  gt_cost: False
+  state_only: False
+  use_images: False
+  offline_demos: 0
+  bc_warm_start: False
+  episodes: 100
+  cost_reg: 0.0
+  hidden_size: 512
+  lr: 0.0002
+

@@ -25,7 +25,7 @@ class RND(nn.Module):
         self.stats = RunningMeanStd(device=device)
 
     def forward(self, x):
-        return self.model(x) - self.target(x)
+        return self.model(x)
 
     @torch.no_grad()
     def get_value(self, x):

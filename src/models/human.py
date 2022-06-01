@@ -135,9 +135,9 @@ class LowDimHuman(Human):
             "expert_cost": expert_cost
         }
 
-    def query_preference(self, traj1, traj2):
-        cost1 = self.env.get_expert_cost([traj1[-1]])[0]
-        cost2 = self.env.get_expert_cost([traj2[-1]])[0]
+    def query_preference(self, states1, actions1, states2, actions2):
+        cost1 = self.env.get_expert_cost(states1, actions1).sum()
+        cost2 = self.env.get_expert_cost(states2, actions2).sum()
         if abs(cost1 - cost2) > self.same_margin:
             label = int(cost1 > cost2)
         else:
