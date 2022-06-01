@@ -29,7 +29,7 @@ class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
         reward = (posafter - posbefore) / self.dt
         reward += alive_bonus
         reward -= 1e-3 * np.square(a).sum()
-        return self._get_obs(), reward, self._max_episode_steps == self.num_steps, {}
+        return self._get_obs(), reward, self._max_episode_steps == self.num_steps, {"lowdim": np.concatenate([self.sim.data.qpos.flat[1:], np.clip(self.sim.data.qvel.flat, -10, 10)])}
 
     def _get_obs(self):
         rendered_img = self.render(mode="rgb_array")
@@ -46,7 +46,7 @@ class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
             low=-0.005, high=0.005, size=self.model.nv
         )
         self.set_state(qpos, qvel)
-        return self._get_obs()
+        return self._get_obs(), {"lowdim": np.concatenate([self.sim.data.qpos.flat[1:], np.clip(self.sim.data.qvel.flat, -10, 10)])}
 
     def visualize_rewards(self, path, model):
         pass

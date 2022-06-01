@@ -137,6 +137,7 @@ class ContSAC:
 
     def train(self, num_games, deterministic=False):
         all_states = []
+        all_states_lowdim = []
         all_actions = []
         all_lengths = []
 
@@ -148,19 +149,21 @@ class ContSAC:
             n_steps = 0
             done = False
             states, actions, rewards, reward_ins, next_states, done_masks = [], [], [], [], [], []
-            state = self.env.reset()
+            states_lowdim = []
+            state, info = self.env.reset()
             while not done:
                 if i <= 2 * self.warmup_games or random.random() < 0.1:
                     action = self.env.action_space.sample()
                 else:
                     action = self.get_action(state, deterministic)
 
-                next_state, reward, done, _ = self.env.step(action)
+                next_state, reward, done, new_info = self.env.step(action)
                 done_mask = 1.0 if n_steps == self.env._max_episode_steps - 1 else float(not done)
 
                 reward_in = self.calc_reward_in(((next_state[np.newaxis, :] - self.normalization.mean) / np.sqrt(self.normalization.var)).clip(-8, 8))[0]
 
                 states.append(state)
+                states_lowdim.append(info["lowdim"])
                 actions.append(action)
                 rewards.append(reward)
                 reward_ins.append(reward_in)
@@ -171,6 +174,7 @@ class ContSAC:
                 total_reward += reward
                 total_reward_in += reward_in
                 state = next_state
+                info = new_info
 
             mean, std, count = np.mean(reward_ins), np.std(reward_ins), len(reward_ins)
             self.reward_normalization.update_from_moments(mean, std ** 2, count)
@@ -182,6 +186,7 @@ class ContSAC:
             states = np.array(states)
             all_states.append(states)
             all_actions.append(np.array(actions))
+            all_states_lowdim.append(np.array(states_lowdim))
             all_lengths.append(len(states))
 
             self.normalization.update(states)
@@ -223,11 +228,13 @@ class ContSAC:
 
             print("index: {}, steps: {}, total_rewards: {}".format(i, n_steps, total_reward))
         padded_all_states = np.zeros((len(all_states), np.max(all_lengths), all_states[0].shape[1], all_states[0].shape[2], all_states[0].shape[3]))
+        padded_all_states_lowdim = np.zeros((len(all_states_lowdim), np.max(all_lengths), len(all_states_lowdim[0][0])))
         padded_all_actions = np.zeros((len(all_actions), np.max(all_lengths), all_actions[0].shape[1]))
         for i in range(len(padded_all_states)):
             padded_all_states[i, :len(all_states[i]), :, :, :] = all_states[i]
+            padded_all_states_lowdim[i, :len(all_states[i]), :] = all_states_lowdim[i]
             padded_all_actions[i, :len(all_actions[i]), :] = all_actions[i]
-        return padded_all_states, padded_all_actions, np.array(all_lengths)
+        return padded_all_states, padded_all_states_lowdim, padded_all_actions, np.array(all_lengths)
 
     def eval(self, num_games, render=True):
         self.policy.eval()

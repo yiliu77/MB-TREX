@@ -2,3 +2,4 @@ src/wandb/
 src/saved/
 .idea/
 *.pyc
+src/scripts/saved/

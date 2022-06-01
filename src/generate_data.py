@@ -32,13 +32,19 @@ if __name__ == "__main__":
     action_dim = env.action_space.shape[0]
 
     model = ContSAC(action_dim, env, "cuda", ent_adj=True)
-    all_states, all_actions, all_lengths = model.train(1000, deterministic=False)
+    all_states, all_states_lowdim, all_actions, all_lengths = model.train(500, deterministic=False)
 
     if not os.path.isdir("saved/{}/data/".format(params["env"]["type"])):
         os.makedirs("saved/{}/data/".format(params["env"]["type"]))
 
     with h5py.File("saved/{}/data/transition_data{}.hdf5".format(params["env"]["type"], data_id), 'w') as f:
         f.create_dataset('images', data=all_states)
+        f.create_dataset('actions', data=all_actions)
+        f.create_dataset('lengths', data=all_lengths)
+        f.close()
+
+    with h5py.File("saved/{}/data/transition_data_lowdim{}.hdf5".format(params["env"]["type"], data_id), 'w') as f:
+        f.create_dataset('images', data=all_states_lowdim)
         f.create_dataset('actions', data=all_actions)
         f.create_dataset('lengths', data=all_lengths)
         f.close()
