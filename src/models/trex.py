@@ -1,15 +1,11 @@
-import os.path as osp
-
-import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from matplotlib.patches import Rectangle
 from torch.optim import Adam
-from models.architectures.utils import get_affine_params
-from itertools import combinations
+from torch.utils.data import TensorDataset, DataLoader
+from scipy import special
+from itertools import combinations, product
+import random
 
 TORCH_DEVICE = torch.device(
     'cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -17,10 +13,10 @@ TORCH_DEVICE = torch.device(
 
 
 class CostNetwork(nn.Module):
-    def __init__(self, state_dim, hidden_size):
+    def __init__(self, input_dim, hidden_size):
         super().__init__()
         self.model = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
+            nn.Linear(input_dim, hidden_size),
             nn.SELU(),
             nn.Linear(hidden_size, hidden_size),
             nn.SELU(),
@@ -41,8 +37,13 @@ class CostNetwork(nn.Module):
         return torch.abs(r)
 
     def get_cost(self, states):
+        t, b, d = states.shape
+        states = states.reshape(t * b, d)
         r = self.model(states)
-        return r
+        r = r.reshape(t, b)
+        sum_rewards = torch.sum(r, dim=0)
+        sum_sq_rewards = torch.sum(torch.square(r), dim=0)
+        return sum_rewards, sum_sq_rewards
 
     def forward(self, traj_i, traj_j):
         cum_r_i, abs_r_i = self.cum_return(traj_i)
@@ -50,137 +51,138 @@ class CostNetwork(nn.Module):
         return torch.cat((cum_r_i.unsqueeze(0), cum_r_j.unsqueeze(0)), 0), abs_r_i + abs_r_j
 
 
-class CostEnsemble(CostNetwork):
-    def __init__(self, num_nets, state_dim, hidden_size):
-        super().__init__()
-
-        self.lin0_w, self.lin0_b = get_affine_params(num_nets,
-                                                     state_dim, hidden_size)
-
-        self.lin1_w, self.lin1_b = get_affine_params(num_nets, hidden_size, hidden_size)
-
-        self.lin2_w, self.lin2_b = get_affine_params(num_nets, hidden_size, hidden_size)
-
-        self.lin3_w, self.lin3_b = get_affine_params(num_nets, hidden_size, 1)
-
-        self.inputs_mu = nn.Parameter(
-            torch.zeros(state_dim), requires_grad=False)
-        self.inputs_sigma = nn.Parameter(
-            torch.zeros(state_dim), requires_grad=False)
-
-    def fit_input_stats(self, data):
-        mu = np.mean(data, axis=0, keepdims=True)
-        sigma = np.std(data, axis=0, keepdims=True)
-        sigma[sigma < 1e-12] = 1.0
-
-        self.inputs_mu.data = torch.from_numpy(mu).to(TORCH_DEVICE).float()
-        self.inputs_sigma.data = torch.from_numpy(sigma).to(
-            TORCH_DEVICE).float()
-
-    def get_cost(self, states):
-        x = (states - self.inputs_mu) / self.inputs_sigma
-
-        x = F.relu(x.matmul(self.lin0_w) + self.lin0_b)
-        x = F.relu(x.matmul(self.lin1_w) + self.lin1_b)
-        x = F.relu(x.matmul(self.lin2_w) + self.lin2_b)
-        x = x.matmul(self.lin3_w) + self.lin3_b
-        return x
-
-    def get_abs_costs(self, states):
-        return torch.abs(self.get_cost(states))
-
-    def cum_return(self, traj):
-        r = self.get_cost(traj)
-        sum_rewards = torch.sum(r, axis=1)
-        sum_abs_rewards = torch.sum(torch.abs(r), axis=1)
-        return sum_rewards, sum_abs_rewards
-
-
 class TRexCost:
-    def __init__(self, encoder, g_dim, params, num_nets=1):
+    def __init__(self, human, state_dim, action_dim, cem_keep_iter, params):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.encoder = encoder
+        self.human = human
         self.params = params
-        self.num_nets = num_nets
-        if num_nets == 1:
-            self.cost_model = CostNetwork(g_dim, params["hidden_size"]).to(self.device)
-            self.cost_opt = Adam(self.cost_model.parameters(), lr=params["lr"])
-        else:
-            self.cost_models = [CostNetwork(g_dim, params["hidden_size"]).to(self.device) for _ in range(num_nets)]
-            self.cost_opts = [Adam(cost.parameters()) for cost in self.cost_models]
 
-    def train(self, all_states1, all_actions1, all_states2, all_actions2, all_labels, num_epochs):
-        loss_fn = nn.CrossEntropyLoss()
+        self.input_dim = state_dim if params["state_only"] else state_dim + action_dim
+        self.preprocess = lambda s, a: s if params["state_only"] else lambda s, a: np.concatenate((s, a), axis=0)
 
-        for epoch in range(num_epochs):
-            for i in range(len(all_states1)):
-                states1, actions1, states2, actions2, label = all_states1[i], all_actions1[i], all_states2[i], all_actions2[i], all_labels[i]
-                states1 = torch.as_tensor(np.array(states1)).float().to(self.device)
-                actions1 = torch.as_tensor(np.array(actions1)).float().to(self.device)
-                states2 = torch.as_tensor(np.array(states2)).float().to(self.device)
-                actions2 = torch.as_tensor(np.array(actions2)).float().to(self.device)
-                label = torch.as_tensor(np.array(label)).long().to(self.device)
+        self.cost_models = [CostNetwork(self.input_dim, params["hidden_dim"]).to(device=self.device) for _ in
+                            range(params["ensemble_size"])]
+        self.cost_opts = [Adam(self.cost_models[i].parameters(), lr=params["lr"]) for i in range(len(self.cost_models))]
 
-                if self.params["use_images"]:
-                    states1 = torch.permute(states1, (0, 3, 1, 2))
-                    states2 = torch.permute(states2, (0, 3, 1, 2))
+        self.cem_keep_per_iter = cem_keep_iter
 
-                encodings1 = self.encoder(states1, actions1)
-                encodings2 = self.encoder(states2, actions2)
+        self.pref_states1 = None
+        self.pref_states2 = None
+        self.pref_labels = None
 
-                member = i % self.num_nets
-
-                if self.num_nets == 1:
-                    outputs, abs_costs = self.cost_model(encodings1, encodings2)
-                else:
-                    outputs, abs_costs = self.cost_models[member](encodings1, encodings2)
-                outputs = outputs.unsqueeze(0)
-
-                train_loss = loss_fn(outputs, 1 - label.unsqueeze(0)) + self.params["cost_reg"] * abs_costs
-                
-                if self.num_nets == 1:
-                    self.cost_opt.zero_grad()
-                else:
-                    self.cost_opts[member].zero_grad()
-                train_loss.backward()
-                if self.num_nets == 1:
-                    self.cost_opt.step()
-                else:
-                    self.cost_opts[member].step()
-
-    def get_value(self, states, actions):
-        with torch.no_grad():
-            enc_states = self.encoder(states, actions).detach()
-            if self.num_nets == 1:
-                costs = self.cost_model.get_cost(enc_states)
+    def train(self, trajs1, trajs2, labels, num_epochs):
+        if trajs1 is not None:
+            if self.pref_states1 is None:
+                self.pref_states1 = trajs1
+                self.pref_states2 = trajs2
+                self.pref_labels = labels
             else:
-                idxs = np.random.permutation(np.arange(self.num_nets))
-                costs_split = [self.cost_models[i].get_cost(enc_states[i::self.num_nets]).squeeze() for i in idxs]
-                costs = torch.empty(states.shape[0]).to(self.device)
-                for i, idx in enumerate(idxs):
-                    costs[idx::self.num_nets] = costs_split[i]
+                self.pref_states1 = np.concatenate([self.pref_states1, trajs1], axis=0)
+                self.pref_states2 = np.concatenate([self.pref_states2, trajs2], axis=0)
+                self.pref_labels = np.concatenate([self.pref_labels, labels], axis=0)
+
+        dataset = TensorDataset(torch.from_numpy(self.pref_states1), torch.from_numpy(self.pref_states1),
+                                torch.from_numpy(self.pref_labels))
+        dataloader = DataLoader(dataset, batch_size=self.params["batch_size"], shuffle=True, persistent_workers=True,
+                                num_workers=4)
+        ce_loss = nn.CrossEntropyLoss()
+        for epoch in range(num_epochs):
+            for data_id, (pref_states1_batch, pref_states2_batch, pref_labels_batch) in enumerate(dataloader):
+                pref_states1_batch = pref_states1_batch.to(self.device).float()
+                pref_states2_batch = pref_states2_batch.to(self.device).float()
+                pref_labels_batch = pref_labels_batch.to(self.device).float()
+
+                for i, cost_model in enumerate(self.cost_models):
+                    (costs1, sq_costs1), (costs2, sq_costs2) = cost_model.get_cost(
+                        pref_states1_batch), cost_model.get_cost(pref_states2_batch)
+                    cost_probs = torch.softmax(torch.stack([costs1, costs2], dim=1), dim=1)
+
+                    loss = ce_loss(pref_labels_batch, cost_probs) + self.params["regularization"] * torch.mean(
+                        sq_costs1 + sq_costs2)
+
+                    self.opts[i].zero_grad()
+                    loss.backward()
+                    self.opts[i].step()
+
+
+    def get_value(self, states, actions=None):
+        if actions is not None:
+            inputs = self.preprocess(states, actions) # for compatibility
+        else:
+            inputs = states
+        with torch.no_grad():
+            costs = torch.mean(torch.cat([self.cost_models[i].get_cost(inputs)[0].unsqueeze(1)
+                                          for i in range(len(self.cost_models))], dim=1), dim=1)
         return costs
 
-    def get_info_gain(self, trajs, M=10, c=1.0):
-        traj_pairs = list(combinations(trajs, 2))
-        traj_pair_MIs = []
-        for traj_1, traj_2 in traj_pairs:
-            rewards_1 = np.array([model.cum_return(traj_1)[0] for model in self.cost_models])
-            reward_1_samples = np.random.normal(np.mean(rewards_1), np.std(rewards_1), M) 
-            rewards_2 = np.array([model.cum_return(traj_2)[0] for model in self.cost_models])
-            reward_2_samples = np.random.normal(np.mean(rewards_2), np.std(rewards_2), M)
 
-            p_1 = 1/(1+ np.exp(-c * (reward_1_samples - reward_2_samples)))
-            p_2 = 1 - p_1
-            h = -1 * (p_1 * np.log(p_1) + p_2 * np.log(p_2))
+    def calc_distribution(self, query_states):
+        with torch.no_grad():
+            pair_indices = [random.sample(range(query_states.shape[1]), k=2) for _ in
+                            range(self.params["num_generated_pairs"])]
+            query_states = torch.as_tensor(query_states, dtype=torch.float32).to(self.device)
+            cost_trajs = torch.cat(
+                [self.cost_models[i].get_cost(query_states)[0].unsqueeze(1) for i in range(len(self.cost_models))],
+                dim=1).cpu().numpy()
 
-            p_1_bar = np.mean(p_1)
-            p_2_bar = np.mean(p_2)
-            H_1 = -1 * (p_1_bar * np.log(p_1_bar) + p_2_bar * np.log(p_2_bar))
-            H_2 = np.mean(h)
+            all_distributions = []
+            for triplet_index in pair_indices:
+                distributions = []
+                for i in range(len(self.cost_models)):
+                    sampled_cost1 = cost_trajs[triplet_index[0]][i]
+                    sampled_cost2 = cost_trajs[triplet_index[1]][i]
+                    probs = special.softmax([sampled_cost1, sampled_cost2])
+                    distributions.append(probs)
+                all_distributions.append(distributions)
+            all_distributions = np.array(all_distributions)
+            return all_distributions, np.array(pair_indices)
 
-            MI = H_1 - H_2
-            traj_pairs_MIs.append(MI)
+
+    def gen_queries(self, all_states, all_actions):
+        if self.params["state_only"]:
+            trajectories = all_states
+        else:
+            trajectories = np.concatenate([all_states, all_actions], axis=0)
+
+        num_queries = self.params["query_batch_size"]
+        if self.params["query_technique"] == "random":
+            pair_indices = np.asmatrix(list(combinations(np.arange(len(trajectories)), 2)))
+            pair_idx = np.random.choice(pair_indices, size=num_queries, replace=False)
+        elif self.params["query_technique"] == "infogain":
+            all_distributions, pair_indices = self.calc_distribution(trajectories)
+            mean = np.mean(all_distributions, axis=1)
+            mean_entropy = -(mean[:, 0] * np.log2(mean[:, 0]) + mean[:, 1] * np.log2(mean[:, 1]))
+
+            ind_entropy = np.zeros_like(mean_entropy)
+            for i in range(all_distributions.shape[1]):
+                ind_entropy += -(all_distributions[:, i, 0] * np.log2(all_distributions[:, i, 0] + 1e-5) +
+                                 all_distributions[:, i, 1] * np.log2(all_distributions[:, i, 1] + 1e-5))
+            score = mean_entropy - ind_entropy / all_distributions.shape[1]
+            indices = np.argpartition(score, -num_queries)[-num_queries:]
+            pair_idx = pair_indices[indices]
+        elif self.params["query_technique"] == "cemiters":
+            pair_indices = np.asmatrix(list(product(np.split(np.arange(len(trajectories)), len(trajectories) // self.cem_keep_per_iter))))
+            pair_idx = np.random.choice(pair_indices, size=num_queries, replace=False)
+        else:
+            raise NotImplementedError
+
+        pref_states1, pref_states2, pref_labels = None, None, None
+        for traj1_index, traj2_index in pair_idx:
+            query1 = trajectories[:, traj1_index, ...]
+            query2 = trajectories[:, traj2_index, ...]
+            label = self.human.query_preference(query1, query2)
+
+            if pref_states1 is None:
+                pref_states1 = query1[np.newaxis, :]
+                pref_states2 = query2[np.newaxis, :]
+                pref_labels = np.array([label])
+            else:
+                pref_states1 = np.concatenate([pref_states1, query1[np.newaxis, :]], axis=0)
+                pref_states2 = np.concatenate([pref_states2, query2[np.newaxis, :]], axis=0)
+                pref_labels = np.concatenate([pref_labels, np.array([label])], axis=0)
+            print("Pairs", pref_states1.shape, pref_labels.shape)
+
+        return pref_states1, pref_states2, pref_labels
 
 
 class GTCost:

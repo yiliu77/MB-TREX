@@ -5,7 +5,7 @@ import cv2
 import os
 
 class MPC:
-    def __init__(self, dyn_prediction, trex_cost, env, params, rnd=None, dynamics_cuda=True, logdir=None):
+    def __init__(self, dyn_prediction, trex_cost, env, params, rnd=None, dynamics_cuda=True):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.dynamics_cuda = dynamics_cuda
@@ -14,17 +14,16 @@ class MPC:
         self.horizon = env.horizon
         self.env = env
         self.cem_iters, self.cem_pop_size, self.cem_elites = params["cem_iters"], params["cem_pop_size"], params["cem_elites"]
+        self.keep_gen_traj = params["keep_gen_traj"]
         self.action_dim = self.env.action_space.shape[0]
         self.ac_bounds = [self.env.action_space.low[0], env.action_space.high[0]]
         self.rnd_weight = params["rnd_weight"]
         self.torchify = lambda x: torch.FloatTensor(x).to(self.device)
-        self.ensemble = params["ensemble"]
         self.rnd = rnd
         self.mean = 0
         self.std = 1
-        self.logdir = logdir
 
-    def act(self, obs, t=0, plot=False):
+    def act(self, obs, t=0):
         with torch.no_grad():
             obs = torch.tensor(obs).float()
             self.obs = obs
@@ -33,10 +32,6 @@ class MPC:
             iter_trajs = []
             std = 1
             mean = 0
-            if plot:
-                fig, axs = plt.subplots(nrows=1, ncols=self.cem_iters, figsize=(4 * self.cem_iters, 4))
-                fig.suptitle("CEM trajectories")
-                background = cv2.resize(self.env._get_obs(images=True), (100, 100))
             for t in range(self.cem_iters):
                 action_samples = torch.empty((self.cem_pop_size, num_steps * self.action_dim)).normal_(mean=0, std=1)
                 action_samples = action_samples * std + mean
@@ -49,20 +44,14 @@ class MPC:
                 elites = actions_sorted[:self.cem_elites]
 
                 if t == self.cem_iters - 1:
-                    keep = np.random.choice(sortid[:self.cem_elites])
+                    keep = np.random.choice(sortid[:self.cem_elites], size=self.keep_gen_traj)
                 else:
-                    keep = np.random.choice(sortid[self.cem_elites:])
-                iter_actions.append(actions[keep])
-                iter_trajs.append(trajs[keep].cpu().numpy())
+                    keep = np.random.choice(sortid[self.cem_elites:], size=self.keep_gen_traj)
+                iter_actions.extend(actions[keep])
+                iter_trajs.extend(trajs[keep].cpu().numpy())
                 mean = torch.mean(elites, dim=0)
                 var = torch.var(elites, dim=0)
                 std = torch.sqrt(var)
-                if plot:
-                    axs[t].imshow(background, extent=[0, 100, 100, 0])
-                    axs[t].plot(trajs[sortid[:self.cem_elites]][0, :, 0].cpu().numpy() * 100 / 0.6 + 50, trajs[sortid[:self.cem_elites]][0, :, 1].cpu().numpy() * 100 / 0.6 + 50)
-            if plot:
-                plt.savefig(os.path.join(self.logdir, plot + ".png"), bbox_inches='tight')
-                plt.close()
                     
 
         ac = mean.reshape(-1, self.action_dim)[0]
@@ -84,9 +73,9 @@ class MPC:
         :return: Tensor of states of shape (# of trajectories, trajectory length + 1, state dimension)
         """
         # acs.shape = [CEM pop size, traj_length, action_dim]
-        if self.dynamics_cuda:
-            actions = acs.permute(1, 0, 2).to(self.device)
-            start_obs = start_obs.to(self.device)
+        if hasattr(self.dyn_prediction, "device"):
+            actions = acs.permute(1, 0, 2).to(self.dyn_prediction.device)
+            start_obs = start_obs.to(self.dyn_prediction.device)
         else:
             actions = acs.permute(1, 0, 2)
         states = start_obs.repeat(1, acs.shape[0], 1)

@@ -47,7 +47,8 @@ class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
 
     def reset(self, pos=(), **kwargs):
         self.num_steps = 0
-        if not pos:
+        pos = tuple(pos)
+        if len(pos) == 0:
             qpos = self.init_qpos + self.np_random.uniform(
                 low=-0.005, high=0.005, size=self.model.nq
             )

@@ -54,13 +54,7 @@ if __name__ == "__main__":
     if params["cost_model"]["gt_cost"]:
         cost_model = GTCost(env)
     else:
-        if params["cost_model"]["state_only"]:
-            g_dim = state_dim
-            encoder = lambda s, a: s
-        else:
-            g_dim = state_dim + action_dim
-            encoder = lambda s, a: torch.cat((s,a), dim=1)
-        cost_model = TRexCost(encoder, g_dim, params["cost_model"], num_nets=1)
+        cost_model = TRexCost(human, state_dim, action_dim, params["mpc"]["keep_gen_traj"], params["cost_model"])
 
     agent_model = MPC(dynamics, cost_model, env, params["mpc"], rnd, dynamics_cuda=not transition_params["gt_dynamics"], logdir=logdir)
     
@@ -239,7 +233,7 @@ if __name__ == "__main__":
                         acs2.append(np.array(traj2)[0, :])
                         bc_labels.append(0)
                     
-        cost_model.train(states1, acs1, states2, acs2, bc_labels, params["cost_model"]["pretrain_epochs"])
+        cost_model.train(states1, states2, bc_labels, params["cost_model"]["pretrain_epochs"])
         
         env.visualize_rewards(os.path.join(logdir, "cost_init.png"), cost_model)
         paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [], [], [], [], []
@@ -304,24 +298,8 @@ if __name__ == "__main__":
                        append_images=pt[1:], duration=67,
                        loop=0)
 
-        indices = list(combinations(range(len(query_states)), 2))
-        np.random.shuffle(indices)
-        new_paired_states1, new_paired_actions1, new_paired_states2, new_paired_actions2, new_labels = [], [], [], [], []
-
-        for i, index in enumerate(indices):
-            new_paired_states1.append(query_states[index[0]])
-            new_paired_states2.append(query_states[index[1]])
-            new_paired_actions1.append(query_actions[index[0]])
-            new_paired_actions2.append(query_actions[index[1]])
-            label = human.query_preference(query_states[index[0]], query_actions[index[0]], query_states[index[1]], query_actions[index[1]])
-            new_labels.append(label)
-        paired_states1 += new_paired_states1
-        paired_actions1 += new_paired_actions1
-        paired_states2 += new_paired_states2
-        paired_actions2 += new_paired_actions2
-        labels += new_labels
-
-        cost_model.train(paired_states1, paired_actions1, paired_states2, paired_actions2, labels, 1)
+        paired_trajs1, paired_trajs2, labels = cost_model.gen_queries(cem_states, cem_actions)
+        cost_model.train(paired_trajs1, paired_trajs2, labels, 1)
 
         #dynamics update
         if (iteration + 1) % transition_params["online_update_freq"] == 0:
