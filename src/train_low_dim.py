@@ -6,8 +6,7 @@ import yaml
 
 from models.trex import TRexCost, GTCost
 from models.mpc import MPC
-from parser import create_env
-from models.human import LowDimHuman
+from parser import create_env, create_human
 from models.dynamics import PtModel, predict_gt_dynamics
 import os
 import datetime
@@ -30,15 +29,16 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     with open(sys.argv[1], 'r') as stream:
         params = yaml.safe_load(stream)
-    logdir = os.path.join("saved/models/TREX/", os.path.splitext(os.path.basename(sys.argv[1]))[0], datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    logdir = os.path.join("saved/models/TREX/", params["env"]["type"], datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     os.makedirs(logdir, exist_ok=True)
+    print("Logging to", logdir)
 
     with open(os.path.join(logdir, "cfg.yaml"), "w") as f:
         yaml.dump(params, f)
 
     state_dim, action_dim = params["env"]["state_dim"], params["env"]["action_dim"]
     env = create_env(params["env"])
-    human = LowDimHuman(env, 0.005)
+    human = create_human(params["human"], env)
     rnd = RND(state_dim, device=device)
 
     transition_params = params["dynamics_model"]
@@ -47,8 +47,7 @@ if __name__ == "__main__":
     if transition_params["gt_dynamics"]:
         dynamics = partial(predict_gt_dynamics, tmp_env, 2)
     else:
-        dynamics = PtModel(state_dim, action_dim).to(device)
-        dynamics.load_state_dict(torch.load(os.path.join("saved/models/state", os.path.splitext(os.path.basename(sys.argv[1]))[0], "model.pth")))
+        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], "model.pth")).to(device)
         # rnd.update_stats_from_states(torch.from_numpy(transitions[np.random.permutation(np.arange(transitions.shape[0]))[:100]][:, 0]).to(device))
 
     if params["cost_model"]["gt_cost"]:
@@ -56,7 +55,7 @@ if __name__ == "__main__":
     else:
         cost_model = TRexCost(human, state_dim, action_dim, params["mpc"]["keep_gen_traj"], params["cost_model"])
 
-    agent_model = MPC(dynamics, cost_model, env, params["mpc"], rnd, dynamics_cuda=not transition_params["gt_dynamics"], logdir=logdir)
+    agent_model = MPC(dynamics, cost_model, env, params["mpc"], rnd, dynamics_cuda=not transition_params["gt_dynamics"])
     
     demo_trajs = []
     demo_states = []
@@ -239,7 +238,7 @@ if __name__ == "__main__":
         paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [], [], [], [], []
     elif params["cost_model"]["offline_demos"] > 0:
         paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [demo_trajs[0][0]], [demo_trajs[0][1]], [demo_trajs[1][0]], [demo_trajs[1][1]], [int(np.sum(env.get_expert_cost(demo_trajs[0][0])) > np.sum(env.get_expert_cost(demo_trajs[1][0])))]
-        cost_model.train(paired_states1, paired_actions1, paired_states2, paired_actions2, labels, params["cost_model"]["pretrain_epochs"])
+        cost_model.train(np.concatenate([paired_states1, paired_actions1], axis=1), np.concatenate([paired_states2, paired_actions2], axis=1), labels, params["cost_model"]["pretrain_epochs"])
         env.visualize_rewards(os.path.join(logdir, "cost_init.png"), cost_model)
 
         background = cv2.resize(env._get_obs(images=True), (100, 100))
@@ -253,11 +252,13 @@ if __name__ == "__main__":
     
     eval_success_rate = []
     num_success = 0
+    plot = params["env"]["type"] == "maze" or params["env"]["type"] == "hopper"
     for iteration in range(params["cost_model"]["episodes"]):
         all_states = []
         all_actions = []
         state = env.reset()
-        frames = [env._get_obs(use_images=True)]
+        if plot:
+            frames = [env._get_obs(use_images=True)]
         t = 0
         done = False
         cem_actions = []
@@ -271,13 +272,18 @@ if __name__ == "__main__":
             all_actions.append(action.detach().cpu().numpy())
 
             state = next_state
-            frames.append(env._get_obs(use_images=True))
+            if plot:
+                frames.append(env._get_obs(use_images=True))
             t += 1
-        print("ITER:", iteration)
+        if "success" in info:
+            num_success += int(info["success"])
+        elif "task_success" in info:
+            num_success += int(info["task_success"])
+        print("ITER:", iteration, "Success", num_success)
         time_step = np.random.choice(np.arange(t))
         query_actions = cem_actions[time_step]
         query_states = cem_states[time_step]
-        if iteration % 5 == 0:
+        if plot and iteration % 5 == 0:
             np.save(os.path.join(logdir, f"ep{iteration}"), np.array(frames))
             imgs = [Image.fromarray(f) for f in frames]
             imgs[0].save(os.path.join(logdir, f"ep{iteration}.gif"), save_all=True, append_images=imgs[1:], duration=67, loop=0)
@@ -298,14 +304,30 @@ if __name__ == "__main__":
                        append_images=pt[1:], duration=67,
                        loop=0)
 
-        paired_trajs1, paired_trajs2, labels = cost_model.gen_queries(cem_states, cem_actions)
-        cost_model.train(paired_trajs1, paired_trajs2, labels, 1)
+        new_paired_trajs1, new_paired_trajs2, new_labels = cost_model.gen_queries(np.array(query_states), np.array(query_actions))
+        cost_model.train(new_paired_trajs1, new_paired_trajs2, new_labels, 1)
 
         #dynamics update
         if (iteration + 1) % transition_params["online_update_freq"] == 0:
             data = np.array([all_states[:-1], all_actions[:-1], all_states[1:]]).transpose(1, 0, 2)
             dynamics.train_dynamics(data, 1, update_stats=False)
         # rnd update
-        rnd.train(torch.tensor(all_states).to(device).float())
+        rnd.train(torch.tensor(np.array(all_states)).to(device).float())
+        if params["env"]["type"] == "maze" and (iteration + 1) % 10 == 0:
+            eval_successes = 0
+            rnd_w = agent_model.rnd_weight
+            agent_model.rnd_weight = 0
+            for i in range(50):
+                done = False
+                state = env.reset()
+                while not done:
+                    action, _, _ = agent_model.act(state, plot=False)
+                    next_state, reward, done, info = env.step(action)
+                    state = next_state
+                if info["success"]:
+                    eval_successes += 1
+            eval_success_rate.append(eval_successes / 50)
+            agent_model.rnd_weight = rnd_w
+    np.save(logdir, "eval_success_rate")
     torch.save(cost_model.cost_model, os.path.join(logdir, "cost_network.pt"))
 

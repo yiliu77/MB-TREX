@@ -80,8 +80,8 @@ class Maze(Env, utils.EzPickle):
         }
         return obs, -cost, done, info
 
-    def _get_obs(self, images=False):
-        if self.use_images or images:
+    def _get_obs(self, use_images=False):
+        if self.use_images or use_images:
             rendered_img = self.sim.render(64, 64, camera_name="cam0")
             rendered_img[rendered_img[:, :, 0] > 200] = [255, 0, 0]
             return rendered_img

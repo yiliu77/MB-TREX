@@ -1,6 +1,6 @@
 env:
   type: "hopper"
-  horizon: 60
+  horizon: 40
   use_images: False
   dense_rewards: True
   max_force: 2
@@ -8,6 +8,11 @@ env:
   dims: [100, 100]
   state_dim: 11
   action_dim: 3
+
+human:
+  type: "hopper_human"
+  same_margin: 0.005
+  actual_human: True
 
 dynamics_model:
   num_dynamics_iters: 200000
@@ -23,8 +28,8 @@ mpc:
   cem_iters: 5
   cem_pop_size: 200
   cem_elites: 20
-  ensemble: False
-  rnd_weight: 0.0
+  rnd_weight: 0.1
+  keep_gen_traj: 10
 cost_model:
   gt_cost: False
   state_only: False
@@ -32,7 +37,13 @@ cost_model:
   offline_demos: 0
   bc_warm_start: False
   episodes: 100
-  cost_reg: 0.0
-  hidden_size: 512
+  regularization: 0.2
+  hidden_dim: 512
   lr: 0.0002
+  ensemble_size: 3
+  query_batch_size: 5
+  batch_size: 10
+  query_technique: "infogain"
+  num_generated_pairs: 20
+
 

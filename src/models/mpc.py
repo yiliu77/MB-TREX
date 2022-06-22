@@ -47,7 +47,7 @@ class MPC:
                     keep = np.random.choice(sortid[:self.cem_elites], size=self.keep_gen_traj)
                 else:
                     keep = np.random.choice(sortid[self.cem_elites:], size=self.keep_gen_traj)
-                iter_actions.extend(actions[keep])
+                iter_actions.extend(actions[keep].numpy())
                 iter_trajs.extend(trajs[keep].cpu().numpy())
                 mean = torch.mean(elites, dim=0)
                 var = torch.var(elites, dim=0)
@@ -61,8 +61,8 @@ class MPC:
         # acs.shape = [CEM pop size, traj_length, action_dim]
         states = self.predict_trajectories(self.obs, acs)[:, :-1, :]
         states_lst = states.reshape(self.cem_pop_size * self.horizon, -1)
-        costs = self.trex_cost.get_value(states_lst, self.torchify(acs.view(-1, self.action_dim))).reshape(self.cem_pop_size, self.horizon).sum(dim=1)
-        costs -= self.rnd_weight * self.rnd_cost(states_lst)
+        costs = self.trex_cost.get_value(states, acs.to(self.device))
+        costs -= self.rnd_weight * self.rnd_cost(states_lst).sum(dim=1)
         return costs, states
 
     def predict_trajectories(self, start_obs, acs):
@@ -73,9 +73,9 @@ class MPC:
         :return: Tensor of states of shape (# of trajectories, trajectory length + 1, state dimension)
         """
         # acs.shape = [CEM pop size, traj_length, action_dim]
-        if hasattr(self.dyn_prediction, "device"):
-            actions = acs.permute(1, 0, 2).to(self.dyn_prediction.device)
-            start_obs = start_obs.to(self.dyn_prediction.device)
+        if self.dynamics_cuda:
+            actions = acs.permute(1, 0, 2).to(self.device)
+            start_obs = start_obs.to(self.device)
         else:
             actions = acs.permute(1, 0, 2)
         states = start_obs.repeat(1, acs.shape[0], 1)
@@ -90,4 +90,4 @@ class MPC:
         raw_rnd = self.rnd.get_value(states)
         normalized_rnd = raw_rnd / torch.sqrt(self.rnd.stddev())
         self.rnd.update_stats(raw_rnd)
-        return normalized_rnd.reshape(self.cem_pop_size, self.horizon)[:, -1]
+        return normalized_rnd.reshape(self.cem_pop_size, self.horizon)

@@ -6,17 +6,12 @@ from torch import nn
 import yaml
 
 from itertools import combinations, product
-from models.trex import TRexCost
-from models.mpc import MPC
 from parser import create_env
-from models.human import LowDimHuman
+from human.human import LowDimHuman
 from models.trex import TRexCost
 import os
 import datetime
 import matplotlib.pyplot as plt
-import cv2
-from models.rnd import RND, RunningMeanStd
-from functools import partial
 
 class BCModel(nn.Module):
 

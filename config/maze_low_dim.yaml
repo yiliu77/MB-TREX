@@ -8,9 +8,12 @@ env:
   walls: True
   state_dim: 2
   action_dim: 2
+human:
+  type: "maze_human"
+  same_margin: 0.005
 
 dynamics_model:
-  num_dynamics_iters: 1000
+  num_dynamics_iters: 100000
   gt_dynamics: False
   epochs: 50
   batch_size: 32
@@ -21,16 +24,21 @@ dynamics_model:
   use_cached: False
 
 cost_model:
-  hidden_size: 512
-  cost_reg: 0.0
+  hidden_dim: 512
+  regularization: 0.0
   lr: 0.0002
   use_images: False
   episodes: 200
-  offline_demos: 2
+  offline_demos: 0
   bc_comp_mode: "same"
-  bc_warm_start: True
+  bc_warm_start: False
   pretrain_epochs: 10
   state_only: True
+  gt_cost: False
+  ensemble_size: 3
+  query_batch_size: 5
+  query_technique: "infogain"
+  batch_size: 10
 
 mpc:
   cem_iters: 5
@@ -38,3 +46,4 @@ mpc:
   cem_elites: 20
   ensemble: False
   rnd_weight: 0.1
+  keep_gen_traj: 10

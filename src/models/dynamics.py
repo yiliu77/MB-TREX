@@ -18,7 +18,8 @@ class PtModel(nn.Module):
         out_features = state_size
         self.in_features = in_features
         self.out_features = out_features
-        hidden_size = 400
+        hidden_size = 512
+        self.normalize = False
 
         self.fc0 = nn.Linear(in_features, hidden_size)
         # nn.init.trunc_normal_(self.fc0.weight, std=1.0 / (2.0 * np.sqrt(in_features)))
@@ -45,8 +46,16 @@ class PtModel(nn.Module):
             torch.zeros(1, in_features), requires_grad=False)
         self.inputs_sigma = nn.Parameter(
             torch.zeros(1, in_features), requires_grad=False)
+        self.outputs_mu = nn.Parameter(
+            torch.zeros(1, state_size), requires_grad=False
+        )
+        self.outputs_sigma = nn.Parameter(
+            torch.zeros(1, state_size), requires_grad=False
+        )
 
-        self.optim = torch.optim.Adam(self.parameters(), lr=lr) # eps=1e-4
+        self.train_in = None
+        self.train_out = None
+        self.optim = torch.optim.AdamW(self.parameters(), lr=lr) # eps=1e-4
 
     def compute_decays(self):
 
@@ -57,14 +66,28 @@ class PtModel(nn.Module):
 
         return lin0_decays + lin1_decays + lin2_decays + lin3_decays
 
-    def fit_input_stats(self, data):
-        mu = np.mean(data, axis=0, keepdims=True)
-        sigma = np.std(data, axis=0, keepdims=True)
-        sigma[sigma < 1e-12] = 1.0
+    def fit_stats(self):
+        train_in = self.train_in
+        train_out = self.train_out
+        in_mu = torch.mean(train_in, dim=0, keepdim=True)
+        in_sigma = torch.std(train_in, dim=0, keepdim=True)
+        in_sigma[in_sigma < 1e-12] = 1.0
 
-        self.inputs_mu.data = torch.from_numpy(mu).to(TORCH_DEVICE).float()
-        self.inputs_sigma.data = torch.from_numpy(sigma).to(
-            TORCH_DEVICE).float()
+        self.inputs_mu.data = in_mu.float()
+        self.inputs_sigma.data = in_sigma.float()
+
+        delta = train_out - train_in[:, :self.state_dim]
+        delta_mu = torch.mean(delta, axis=0, keepdims=True)
+        delta_sigma = torch.std(delta, axis=0, keepdims=True)
+        delta_sigma[delta_sigma < 1e-12] = 1.0
+        self.outputs_mu.data = delta_mu.float()
+        self.outputs_sigma.data = delta_sigma.float()
+
+        if not self.normalize:
+            self.inputs_mu.data = torch.zeros(in_mu.shape).to(TORCH_DEVICE)
+            self.inputs_sigma.data = torch.ones(in_sigma.shape).to(TORCH_DEVICE)
+            self.outputs_mu.data = torch.zeros(delta_mu.shape).to(TORCH_DEVICE)
+            self.outputs_sigma.data = torch.ones(delta_sigma.shape).to(TORCH_DEVICE)
 
     def forward(self, inputs):
         # Transform inputs
@@ -74,17 +97,22 @@ class PtModel(nn.Module):
         x = swish(self.fc2(x))
         x = self.fc3(x)
 
-        return x * self.inputs_sigma[:, self.state_dim] + self.inputs_mu[:, :self.state_dim] + inputs[:, :self.state_dim]
+        return x * self.outputs_sigma + self.outputs_mu + inputs[:, :self.state_dim]
 
     def train_dynamics(self, observations, actions, epochs, batch_size=32, val_split=0.9, patience=100, update_stats=True):
         # data = [[S, A, S'] * len(data) ]
         split = int(val_split * len(actions))
 
         train_in = np.concatenate((observations[:split], actions[:split]), axis=1)
-        self.train_in = torch.from_numpy(train_in).to(TORCH_DEVICE).float()
-        self.train_out = torch.from_numpy(observations[1:split+1]).to(TORCH_DEVICE).float()
+        train_out = observations[1:split + 1]
+        if self.train_in is None:
+            self.train_in = torch.from_numpy(train_in).to(TORCH_DEVICE).float()
+            self.train_out = torch.from_numpy(train_out).to(TORCH_DEVICE).float()
+        else:
+            self.train_in = torch.cat([self.train_in, train_in], dim=1)
+            self.train_out = torch.cat([self.train_out, train_out], dim=1)
         if update_stats:
-            self.fit_input_stats(train_in)
+            self.fit_stats()
 
         val_in = np.concatenate((observations[split:-1], actions[split:]), axis=1)
         val_in = torch.from_numpy(val_in).to(TORCH_DEVICE).float()
@@ -96,7 +124,7 @@ class PtModel(nn.Module):
         k = 0
         val_losses = []
         best_params = self.parameters()
-        for _ in epoch_range:
+        for t in epoch_range:
             idx = np.random.permutation(split)
             for i in range(num_batches):
                 batch_idx = idx[i * batch_size: (i + 1) * batch_size]
@@ -105,12 +133,15 @@ class PtModel(nn.Module):
                 batch_out = self.train_out[batch_idx]
                 model_out = self.forward(batch_in)
                 self.optim.zero_grad()
-                loss = loss_fn(model_out, batch_out)
+                loss = loss_fn((model_out - batch_in[:, :self.state_dim] - self.outputs_mu) / (self.outputs_sigma),
+                               (batch_out - batch_in[:, :self.state_dim]) / self.outputs_sigma)
                 loss.backward()
                 self.optim.step()
             if val_split < 1:
                 with torch.no_grad():
-                    val_losses.append(loss_fn(self.forward(val_in), val_out).item())
+                    val_losses.append(loss_fn((self.forward(val_in) - val_in[:, :self.state_dim] - self.inputs_mu[:, :self.state_dim]) / (self.inputs_sigma[:, :self.state_dim]),
+                                              (val_out - val_in[:, :self.state_dim]) / self.inputs_sigma[:, :self.state_dim]).item())
+                    print("Epoch:", t, "Val Loss:", val_losses[-1])
                     if len(val_losses) > 1:
                         if val_losses[-1] > val_losses[-2]:
                             k += 1

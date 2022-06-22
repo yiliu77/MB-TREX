@@ -2,6 +2,8 @@ import sys
 import os
 import numpy as np
 import torch
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import yaml
 from parser import create_env
@@ -23,13 +25,13 @@ if __name__ == '__main__':
     name = params["env"]["type"]
     logdir = os.path.join("saved/models/state/", name)
     os.makedirs(logdir, exist_ok=True)
-
+    print("Logging to", logdir)
     env = create_env(params["env"])
     transition_params = params["dynamics_model"]
 
     if transition_params["use_cached"]:
-        observations = np.load(os.path.join("saved/data/state/", name, "observations.npy"))
-        actions = np.load(os.path.join("saved/data/state/", name, "actions.npy"))
+        observations = np.load(os.path.join(logdir, transition_params["save_obs"] + ".npy"))
+        actions = np.load(os.path.join(logdir, transition_params["save_acs"] + ".npy"))
     else:
         obs = env.reset()
         observations = [obs]
@@ -40,21 +42,25 @@ if __name__ == '__main__':
             actions.append(action)
             next_obs, _, _, _ = env.step(action)
             obs = next_obs
-            if i % 20 == 0:
-                obs = env.reset(difficulty=None, check_constraint=False)
+            if i % 200 == 0:
+                obs = env.reset()#difficulty=None, check_constraint=False)
             observations.append(obs)
         observations = np.array(observations)
         actions = np.array(actions)
+        np.save(os.path.join(logdir, transition_params["save_obs"]), observations)
+        np.save(os.path.join(logdir, transition_params["save_acs"]), actions)
 
     print("Beginning training model...")
     dynamics = PtModel(params["env"]["state_dim"], params["env"]["action_dim"], lr=transition_params["lr"]).to(device)
     val_loss = dynamics.train_dynamics(observations, actions, transition_params["epochs"],
                                        val_split=transition_params["train_test_split"])
 
+    torch.save(dynamics, os.path.join(logdir, "model_unnorm.pth"))
+
     plt.figure()
     plt.plot(val_loss)
     plt.xlabel("epoch")
     plt.ylabel("Val loss")
     plt.title("Dynamics training")
-    plt.savefig(os.path.join(logdir, "dynamics.png"))
+    plt.savefig(os.path.join(logdir, "training.png"))
     plt.close()

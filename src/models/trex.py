@@ -37,12 +37,12 @@ class CostNetwork(nn.Module):
         return torch.abs(r)
 
     def get_cost(self, states):
-        t, b, d = states.shape
+        b, t, d = states.shape
         states = states.reshape(t * b, d)
         r = self.model(states)
-        r = r.reshape(t, b)
-        sum_rewards = torch.sum(r, dim=0)
-        sum_sq_rewards = torch.sum(torch.square(r), dim=0)
+        r = r.reshape(b, t)
+        sum_rewards = torch.sum(r, dim=1)
+        sum_sq_rewards = torch.sum(torch.square(r), dim=1)
         return sum_rewards, sum_sq_rewards
 
     def forward(self, traj_i, traj_j):
@@ -58,11 +58,11 @@ class TRexCost:
         self.params = params
 
         self.input_dim = state_dim if params["state_only"] else state_dim + action_dim
-        self.preprocess = lambda s, a: s if params["state_only"] else lambda s, a: np.concatenate((s, a), axis=0)
+        self.preprocess = (lambda s, a: s) if params["state_only"] else (lambda s, a: torch.cat((s, a), dim=-1))
 
         self.cost_models = [CostNetwork(self.input_dim, params["hidden_dim"]).to(device=self.device) for _ in
                             range(params["ensemble_size"])]
-        self.cost_opts = [Adam(self.cost_models[i].parameters(), lr=params["lr"]) for i in range(len(self.cost_models))]
+        self.opts = [Adam(self.cost_models[i].parameters(), lr=params["lr"]) for i in range(len(self.cost_models))]
 
         self.cem_keep_per_iter = cem_keep_iter
 
@@ -85,7 +85,6 @@ class TRexCost:
                                 torch.from_numpy(self.pref_labels))
         dataloader = DataLoader(dataset, batch_size=self.params["batch_size"], shuffle=True, persistent_workers=True,
                                 num_workers=4)
-        ce_loss = nn.CrossEntropyLoss()
         for epoch in range(num_epochs):
             for data_id, (pref_states1_batch, pref_states2_batch, pref_labels_batch) in enumerate(dataloader):
                 pref_states1_batch = pref_states1_batch.to(self.device).float()
@@ -97,7 +96,8 @@ class TRexCost:
                         pref_states1_batch), cost_model.get_cost(pref_states2_batch)
                     cost_probs = torch.softmax(torch.stack([costs1, costs2], dim=1), dim=1)
 
-                    loss = ce_loss(pref_labels_batch, cost_probs) + self.params["regularization"] * torch.mean(
+                    loss = pref_labels_batch * cost_probs[:, 0] + (1 - pref_labels_batch) * cost_probs[:, 1]
+                    loss = -torch.mean(loss) + self.params["regularization"] * torch.mean(
                         sq_costs1 + sq_costs2)
 
                     self.opts[i].zero_grad()
@@ -106,7 +106,11 @@ class TRexCost:
 
 
     def get_value(self, states, actions=None):
+        if not torch.is_tensor(states):
+            states = torch.from_numpy(states).to(self.device)
         if actions is not None:
+            if not torch.is_tensor(actions):
+                actions = torch.from_numpy(actions).to(self.device)
             inputs = self.preprocess(states, actions) # for compatibility
         else:
             inputs = states
@@ -118,7 +122,7 @@ class TRexCost:
 
     def calc_distribution(self, query_states):
         with torch.no_grad():
-            pair_indices = [random.sample(range(query_states.shape[1]), k=2) for _ in
+            pair_indices = [random.sample(range(query_states.shape[0]), k=2) for _ in
                             range(self.params["num_generated_pairs"])]
             query_states = torch.as_tensor(query_states, dtype=torch.float32).to(self.device)
             cost_trajs = torch.cat(
@@ -142,16 +146,16 @@ class TRexCost:
         if self.params["state_only"]:
             trajectories = all_states
         else:
-            trajectories = np.concatenate([all_states, all_actions], axis=0)
+            trajectories = np.concatenate([all_states, all_actions], axis=-1)
 
         num_queries = self.params["query_batch_size"]
         if self.params["query_technique"] == "random":
-            pair_indices = np.asmatrix(list(combinations(np.arange(len(trajectories)), 2)))
-            pair_idx = np.random.choice(pair_indices, size=num_queries, replace=False)
+            pair_indices = np.array(list(combinations(np.arange(len(trajectories)), 2))).squeeze()
+            pair_idx = pair_indices[np.random.choice(len(pair_indices), size=num_queries, replace=False)]
         elif self.params["query_technique"] == "infogain":
             all_distributions, pair_indices = self.calc_distribution(trajectories)
             mean = np.mean(all_distributions, axis=1)
-            mean_entropy = -(mean[:, 0] * np.log2(mean[:, 0]) + mean[:, 1] * np.log2(mean[:, 1]))
+            mean_entropy = -(mean[:, 0] * np.log2(mean[:, 0] + 1e-5) + mean[:, 1] * np.log2(mean[:, 1]) + 1e-5)
 
             ind_entropy = np.zeros_like(mean_entropy)
             for i in range(all_distributions.shape[1]):
@@ -161,15 +165,15 @@ class TRexCost:
             indices = np.argpartition(score, -num_queries)[-num_queries:]
             pair_idx = pair_indices[indices]
         elif self.params["query_technique"] == "cemiters":
-            pair_indices = np.asmatrix(list(product(np.split(np.arange(len(trajectories)), len(trajectories) // self.cem_keep_per_iter))))
-            pair_idx = np.random.choice(pair_indices, size=num_queries, replace=False)
+            pair_indices = np.array(list(combinations(np.split(np.arange(len(trajectories)), len(trajectories) // self.cem_keep_per_iter), 2))).squeeze()
+            pair_idx = pair_indices[np.random.choice(len(pair_indices), size=num_queries, replace=False)]
         else:
             raise NotImplementedError
 
         pref_states1, pref_states2, pref_labels = None, None, None
         for traj1_index, traj2_index in pair_idx:
-            query1 = trajectories[:, traj1_index, ...]
-            query2 = trajectories[:, traj2_index, ...]
+            query1 = trajectories[traj1_index, ...]
+            query2 = trajectories[traj2_index, ...]
             label = self.human.query_preference(query1, query2)
 
             if pref_states1 is None:
@@ -180,8 +184,6 @@ class TRexCost:
                 pref_states1 = np.concatenate([pref_states1, query1[np.newaxis, :]], axis=0)
                 pref_states2 = np.concatenate([pref_states2, query2[np.newaxis, :]], axis=0)
                 pref_labels = np.concatenate([pref_labels, np.array([label])], axis=0)
-            print("Pairs", pref_states1.shape, pref_labels.shape)
-
         return pref_states1, pref_states2, pref_labels
 
 

@@ -17,7 +17,6 @@ class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
         filename = os.path.join(dirname, 'assets/hopper.xml')
         mujoco_env.MujocoEnv.__init__(self, filename, 4)
         utils.EzPickle.__init__(self)
-        self.observation_space = self.observation_space.shape
     
 
     def step(self, a):
