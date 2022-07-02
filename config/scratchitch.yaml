@@ -6,7 +6,7 @@ env:
   max_force: 2
   goal_thresh: 0.0
   dims: [100, 100]
-  state_dim: 31
+  state_dim: 4
   action_dim: 7
 
 human:

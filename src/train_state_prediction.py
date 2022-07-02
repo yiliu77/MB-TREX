@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
     print("Beginning training model...")
     dynamics = PtModel(params["env"]["state_dim"], params["env"]["action_dim"], lr=transition_params["lr"]).to(device)
-    val_loss = dynamics.train_dynamics(observations, actions, transition_params["epochs"],
+    val_loss = dynamics.train_dynamics(np.concatenate((observations[:, 7:10], observations[:, -1:]), axis=1), actions, transition_params["epochs"],
                                        val_split=transition_params["train_test_split"])
 
     torch.save(dynamics, os.path.join(logdir, "model_unnorm.pth"))

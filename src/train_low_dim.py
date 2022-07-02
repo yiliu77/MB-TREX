@@ -329,5 +329,6 @@ if __name__ == "__main__":
             eval_success_rate.append(eval_successes / 50)
             agent_model.rnd_weight = rnd_w
     np.save(logdir, "eval_success_rate")
-    torch.save(cost_model.cost_model, os.path.join(logdir, "cost_network.pt"))
+    for i, model in cost_model.cost_models:
+        torch.save(model, os.path.join(logdir, f"cost_network_{i}.pt"))
 
