@@ -19,7 +19,7 @@ class PtModel(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         hidden_size = 512
-        self.normalize = False
+        self.normalize = True
 
         self.fc0 = nn.Linear(in_features, hidden_size)
         # nn.init.trunc_normal_(self.fc0.weight, std=1.0 / (2.0 * np.sqrt(in_features)))
@@ -100,11 +100,22 @@ class PtModel(nn.Module):
         return x * self.outputs_sigma + self.outputs_mu + inputs[:, :self.state_dim]
 
     def train_dynamics(self, observations, actions, epochs, batch_size=32, val_split=0.9, patience=100, update_stats=True):
-        # data = [[S, A, S'] * len(data) ]
-        split = int(val_split * len(actions))
-
-        train_in = np.concatenate((observations[:split], actions[:split]), axis=1)
-        train_out = observations[1:split + 1]
+        # observations.shape = (# trajectories, len trajectories, len observations)
+        data_in = []
+        data_out = []
+        for o, a in zip(observations, actions):
+            data_in.append(np.concatenate((o[:-1], a[:-1]), axis=-1))
+            data_out.append(o[1:])
+        data_in = np.vstack(data_in)
+        data_out = np.vstack(data_out)
+        shuffle_idx = np.random.permutation(len(data_in))
+        data_in = data_in[shuffle_idx]
+        data_out = data_out[shuffle_idx]
+        split = int(val_split * len(data_in))
+        train_in = data_in[:split]
+        train_out = data_out[:split]
+        # train_in = np.concatenate((observations[:split], actions[:split]), axis=1)
+        # train_out = observations[1:split + 1]
         if self.train_in is None:
             self.train_in = torch.from_numpy(train_in).to(TORCH_DEVICE).float()
             self.train_out = torch.from_numpy(train_out).to(TORCH_DEVICE).float()
@@ -113,11 +124,14 @@ class PtModel(nn.Module):
             self.train_out = torch.cat([self.train_out, train_out], dim=1)
         if update_stats:
             self.fit_stats()
+            print(self.inputs_mu, self.inputs_sigma, self.outputs_mu, self.outputs_sigma)
+        # val_in = np.concatenate((observations[split:-1], actions[split:-1]), axis=1)
+        # val_in = torch.from_numpy(val_in).to(TORCH_DEVICE).float()
+        # val_out = torch.from_numpy(observations[split+1:]).to(TORCH_DEVICE).float()
+        val_in = torch.from_numpy(data_in[split:]).to(TORCH_DEVICE).float()
+        val_out = torch.from_numpy(data_out[split:]).to(TORCH_DEVICE).float()
 
-        val_in = np.concatenate((observations[split:-1], actions[split:]), axis=1)
-        val_in = torch.from_numpy(val_in).to(TORCH_DEVICE).float()
-        val_out = torch.from_numpy(observations[split+1:]).to(TORCH_DEVICE).float()
-        
+        print(self.train_in.shape, val_in.shape)
         num_batches = split // batch_size + 1
         loss_fn = torch.nn.MSELoss()
         epoch_range = trange(epochs, unit="epoch(s)", desc="Network training")

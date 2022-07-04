@@ -34,17 +34,23 @@ if __name__ == '__main__':
         actions = np.load(os.path.join(logdir, transition_params["save_acs"] + ".npy"))
     else:
         obs = env.reset()
-        observations = [obs]
-        actions = []
+        observations = [[obs]]
+        actions = [[]]
         print("Collecting dynamics data...")
         for i in range(transition_params["num_dynamics_iters"]):
             action = env.action_space.sample()
-            actions.append(action)
+            actions[-1].append(action)
             next_obs, _, _, _ = env.step(action)
             obs = next_obs
-            if i % 200 == 0:
-                obs = env.reset()#difficulty=None, check_constraint=False)
-            observations.append(obs)
+            if (i + 1) % 30 == 0:
+                observations[-1] = np.vstack(observations[-1])
+                actions[-1] = np.vstack(actions[-1])
+                observations.append([])
+                actions.append([])
+                obs = env.reset(difficulty=None, check_constraint=False)
+            observations[-1].append(obs)
+        observations.pop()
+        actions.pop()
         observations = np.array(observations)
         actions = np.array(actions)
         np.save(os.path.join(logdir, transition_params["save_obs"]), observations)
@@ -52,10 +58,13 @@ if __name__ == '__main__':
 
     print("Beginning training model...")
     dynamics = PtModel(params["env"]["state_dim"], params["env"]["action_dim"], lr=transition_params["lr"]).to(device)
-    val_loss = dynamics.train_dynamics(np.concatenate((observations[:, 7:10], observations[:, -1:]), axis=1), actions, transition_params["epochs"],
+    # val_loss = dynamics.train_dynamics(np.concatenate((observations[:, 7:10], observations[:, -1:]), axis=1), actions, transition_params["epochs"],
+    #                                    val_split=transition_params["train_test_split"])
+    val_loss = dynamics.train_dynamics(observations[:100000], actions[:100000],
+                                       transition_params["epochs"],
                                        val_split=transition_params["train_test_split"])
 
-    torch.save(dynamics, os.path.join(logdir, "model_unnorm.pth"))
+    torch.save(dynamics, os.path.join(logdir, "model.pth"))
 
     plt.figure()
     plt.plot(val_loss)

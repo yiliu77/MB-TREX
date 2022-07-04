@@ -47,7 +47,7 @@ if __name__ == "__main__":
     if transition_params["gt_dynamics"]:
         dynamics = partial(predict_gt_dynamics, tmp_env, 2)
     else:
-        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], "model.pth")).to(device)
+        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], "model_sac.pth")).to(device)
         # rnd.update_stats_from_states(torch.from_numpy(transitions[np.random.permutation(np.arange(transitions.shape[0]))[:100]][:, 0]).to(device))
 
     if params["cost_model"]["gt_cost"]:
@@ -321,7 +321,7 @@ if __name__ == "__main__":
                 done = False
                 state = env.reset()
                 while not done:
-                    action, _, _ = agent_model.act(state, plot=False)
+                    action, _, _ = agent_model.act(state)
                     next_state, reward, done, info = env.step(action)
                     state = next_state
                 if info["success"]:
@@ -329,6 +329,6 @@ if __name__ == "__main__":
             eval_success_rate.append(eval_successes / 50)
             agent_model.rnd_weight = rnd_w
     np.save(logdir, "eval_success_rate")
-    for i, model in cost_model.cost_models:
+    for i, model in enumerate(cost_model.cost_models):
         torch.save(model, os.path.join(logdir, f"cost_network_{i}.pt"))
 

@@ -13,7 +13,7 @@ human:
   same_margin: 0.005
 
 dynamics_model:
-  num_dynamics_iters: 100000
+  num_dynamics_iters: 120000
   gt_dynamics: False
   epochs: 50
   batch_size: 32
@@ -21,7 +21,9 @@ dynamics_model:
   train_test_split: 0.9
   num_cores: 10
   online_update_freq: 100000
-  use_cached: False
+  use_cached: True
+  save_obs: "obs"
+  save_acs: "acs"
 
 cost_model:
   hidden_dim: 512
@@ -36,9 +38,10 @@ cost_model:
   state_only: True
   gt_cost: False
   ensemble_size: 3
-  query_batch_size: 5
+  query_batch_size: 10
   query_technique: "infogain"
   batch_size: 10
+  num_generated_pairs: 45
 
 mpc:
   cem_iters: 5
