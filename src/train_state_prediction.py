@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import yaml
 from parser import create_env
 from models.dynamics import PtModel
+import tqdm
 
 
 
@@ -37,17 +38,17 @@ if __name__ == '__main__':
         observations = [[obs]]
         actions = [[]]
         print("Collecting dynamics data...")
-        for i in range(transition_params["num_dynamics_iters"]):
+        for i in tqdm.trange(transition_params["num_dynamics_iters"]):
             action = env.action_space.sample()
             actions[-1].append(action)
             next_obs, _, _, _ = env.step(action)
             obs = next_obs
-            if (i + 1) % 30 == 0:
+            if (i + 1) % 200 == 0:
                 observations[-1] = np.vstack(observations[-1])
                 actions[-1] = np.vstack(actions[-1])
                 observations.append([])
                 actions.append([])
-                obs = env.reset(difficulty=None, check_constraint=False)
+                obs = env.reset()#difficulty=None, check_constraint=False)
             observations[-1].append(obs)
         observations.pop()
         actions.pop()

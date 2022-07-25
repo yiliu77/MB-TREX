@@ -81,7 +81,7 @@ class TRexCost:
                 self.pref_states2 = np.concatenate([self.pref_states2, trajs2], axis=0)
                 self.pref_labels = np.concatenate([self.pref_labels, labels], axis=0)
 
-        dataset = TensorDataset(torch.from_numpy(self.pref_states1), torch.from_numpy(self.pref_states1),
+        dataset = TensorDataset(torch.from_numpy(self.pref_states1), torch.from_numpy(self.pref_states2),
                                 torch.from_numpy(self.pref_labels))
         dataloader = DataLoader(dataset, batch_size=self.params["batch_size"], shuffle=True, persistent_workers=True,
                                 num_workers=4)
@@ -96,7 +96,7 @@ class TRexCost:
                         pref_states1_batch), cost_model.get_cost(pref_states2_batch)
                     cost_probs = torch.softmax(torch.stack([costs1, costs2], dim=1), dim=1)
 
-                    loss = pref_labels_batch * cost_probs[:, 0] + (1 - pref_labels_batch) * cost_probs[:, 1]
+                    loss = pref_labels_batch * torch.log(cost_probs[:, 0]) + (1 - pref_labels_batch) * torch.log(cost_probs[:, 1])
                     loss = -torch.mean(loss) + self.params["regularization"] * torch.mean(
                         sq_costs1 + sq_costs2)
 
@@ -107,10 +107,10 @@ class TRexCost:
 
     def get_value(self, states, actions=None):
         if not torch.is_tensor(states):
-            states = torch.from_numpy(states).to(self.device)
+            states = torch.from_numpy(states).float().to(self.device)
         if actions is not None:
             if not torch.is_tensor(actions):
-                actions = torch.from_numpy(actions).to(self.device)
+                actions = torch.from_numpy(actions).float().to(self.device)
             inputs = self.preprocess(states, actions) # for compatibility
         else:
             inputs = states
@@ -199,3 +199,6 @@ class GTCost:
     
     def train(self, *args):
         pass
+
+    def gen_queries(self, *args):
+        return None, None, None

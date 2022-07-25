@@ -18,7 +18,7 @@ class PtModel(nn.Module):
         out_features = state_size
         self.in_features = in_features
         self.out_features = out_features
-        hidden_size = 512
+        hidden_size = 256
         self.normalize = True
 
         self.fc0 = nn.Linear(in_features, hidden_size)
@@ -34,11 +34,17 @@ class PtModel(nn.Module):
         # nn.init.constant_(self.fc2.bias, 0)
 
         self.fc3 = nn.Linear(hidden_size, out_features)
+
+        # self.fc4 = nn.Linear(hidden_size, hidden_size)
+
+        # self.fc5 = nn.Linear(hidden_size, hidden_size)
+        #
+        # self.fc6 = nn.Linear(hidden_size, out_features)
         # nn.init.trunc_normal_(self.fc3.weight, std=1.0 / (2.0 * np.sqrt(200)))
         # nn.init.constant_(self.fc3.bias, 0)
 
         with torch.no_grad():
-            for layer in [self.fc0, self.fc1, self.fc2, self.fc3]:
+            for layer in [self.fc0, self.fc1, self.fc2, self.fc3]: #self.fc4, self.fc5, self.fc6]:
                 layer.weight = nn.Parameter(truncated_normal(layer.weight.shape, 1 / (2.0 * np.sqrt(layer.weight.shape[0]))))
                 layer.bias = nn.Parameter(torch.zeros(1, layer.out_features, dtype=torch.float32))
     
@@ -96,6 +102,9 @@ class PtModel(nn.Module):
         x = swish(self.fc1(x))
         x = swish(self.fc2(x))
         x = self.fc3(x)
+        # x = swish(self.fc4(x))
+        # x = swish(self.fc5(x))
+        # x = self.fc6(x)
 
         return x * self.outputs_sigma + self.outputs_mu + inputs[:, :self.state_dim]
 

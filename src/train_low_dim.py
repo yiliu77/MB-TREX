@@ -252,8 +252,9 @@ if __name__ == "__main__":
     
     eval_success_rate = []
     num_success = 0
-    plot = params["env"]["type"] == "maze" or params["env"]["type"] == "hopper"
-    for iteration in range(params["cost_model"]["episodes"]):
+    plot = True #params["env"]["type"] == "maze" or params["env"]["type"] == "hopper"
+    true_costs = []
+    for iteration in range(1, params["cost_model"]["episodes"] + 1):
         all_states = []
         all_actions = []
         state = env.reset()
@@ -263,9 +264,13 @@ if __name__ == "__main__":
         done = False
         cem_actions = []
         cem_states = []
+        episode_reward = 0
+        learned_cost = 0
         while not done:
             action, generated_actions, generated_states = agent_model.act(state)
             next_state, reward, done, info = env.step(action)
+            episode_reward += reward
+            learned_cost += cost_model.get_value(state.reshape(1, 1, -1), action.reshape(1,1, -1)).cpu().numpy().item()
             cem_actions.append(generated_actions)
             cem_states.append(generated_states)
             all_states.append(state)
@@ -275,11 +280,12 @@ if __name__ == "__main__":
             if plot:
                 frames.append(env._get_obs(use_images=True))
             t += 1
+        true_costs.append(-episode_reward)
         if "success" in info:
             num_success += int(info["success"])
         elif "task_success" in info:
             num_success += int(info["task_success"])
-        print("ITER:", iteration, "Success", num_success)
+        print("ITER:", iteration, "COST:", -episode_reward, "LEARNED COST:", learned_cost, "Success", num_success)
         time_step = np.random.choice(np.arange(t))
         query_actions = cem_actions[time_step]
         query_states = cem_states[time_step]
@@ -287,48 +293,68 @@ if __name__ == "__main__":
             np.save(os.path.join(logdir, f"ep{iteration}"), np.array(frames))
             imgs = [Image.fromarray(f) for f in frames]
             imgs[0].save(os.path.join(logdir, f"ep{iteration}.gif"), save_all=True, append_images=imgs[1:], duration=67, loop=0)
-            tmp_env.reset(pos=all_states[time_step])
-            gt_frames = [tmp_env._get_obs(use_images=True)]
-            pt_frames = [tmp_env._get_obs(use_images=True)]
-            for action in query_actions[0]:
-                tmp_env.step(action)
-                gt_frames.append(tmp_env._get_obs(use_images=True))
-            for pt_state in query_states[0]:
-                tmp_env.reset(pos=pt_state)
-                pt_frames.append(tmp_env._get_obs(use_images=True))
-            gt = [Image.fromarray(f) for f in gt_frames]
-            gt[0].save(os.path.join(logdir, f"ep{iteration}_step{time_step}_gt.gif"), save_all=True, append_images=gt[1:], duration=67,
-                         loop=0)
-            pt = [Image.fromarray(f) for f in pt_frames]
-            pt[0].save(os.path.join(logdir, f"ep{iteration}_step{time_step}_pt.gif"), save_all=True,
-                       append_images=pt[1:], duration=67,
-                       loop=0)
+            # tmp_env.reset(pos=all_states[time_step])
+            # gt_frames = [tmp_env._get_obs(use_images=True)]
+            # pt_frames = [tmp_env._get_obs(use_images=True)]
+            # for action in query_actions[0]:
+            #     tmp_env.step(action)
+            #     gt_frames.append(tmp_env._get_obs(use_images=True))
+            # for pt_state in query_states[0]:
+            #     tmp_env.reset(pos=pt_state)
+            #     pt_frames.append(tmp_env._get_obs(use_images=True))
+            # gt = [Image.fromarray(f) for f in gt_frames]
+            # gt[0].save(os.path.join(logdir, f"ep{iteration}_step{time_step}_gt.gif"), save_all=True, append_images=gt[1:], duration=67,
+            #              loop=0)
+            # pt = [Image.fromarray(f) for f in pt_frames]
+            # pt[0].save(os.path.join(logdir, f"ep{iteration}_step{time_step}_pt.gif"), save_all=True,
+            #            append_images=pt[1:], duration=67,
+            #            loop=0)
 
         new_paired_trajs1, new_paired_trajs2, new_labels = cost_model.gen_queries(np.array(query_states), np.array(query_actions))
         cost_model.train(new_paired_trajs1, new_paired_trajs2, new_labels, 1)
 
         #dynamics update
-        if (iteration + 1) % transition_params["online_update_freq"] == 0:
+        if iteration % transition_params["online_update_freq"] == 0:
             data = np.array([all_states[:-1], all_actions[:-1], all_states[1:]]).transpose(1, 0, 2)
             dynamics.train_dynamics(data, 1, update_stats=False)
         # rnd update
         rnd.train(torch.tensor(np.array(all_states)).to(device).float())
-        if params["env"]["type"] == "maze" and (iteration + 1) % 10 == 0:
+        if iteration % 10 == 0:
             eval_successes = 0
             rnd_w = agent_model.rnd_weight
             agent_model.rnd_weight = 0
+            true_eval_costs = []
+            learned_eval_costs = []
             for i in range(50):
                 done = False
                 state = env.reset()
+                true_cost = 0
+                learned_cost = 0
                 while not done:
                     action, _, _ = agent_model.act(state)
                     next_state, reward, done, info = env.step(action)
                     state = next_state
-                if info["success"]:
+                    true_cost -= reward
+                    learned_cost += cost_model.get_value(state.reshape(1, 1, -1), action.reshape(1,1, -1)).cpu().numpy().item()
+                if "success" in info and info["success"]:
                     eval_successes += 1
+                true_eval_costs.append(true_cost)
+                learned_eval_costs.append(learned_cost)
+            plt.figure()
+            plt.scatter(true_eval_costs, learned_eval_costs)
+            plt.xlabel("True Cost")
+            plt.ylabel("Learned Cost")
+            plt.savefig(os.path.join(logdir, f"ep{iteration}_eval_cost.png"))
+            plt.close()
             eval_success_rate.append(eval_successes / 50)
             agent_model.rnd_weight = rnd_w
-    np.save(logdir, "eval_success_rate")
+    # np.save(logdir, "eval_success_rate")/
+    np.save(os.path.join(logdir, "true_cost"), true_costs)
+    plt.figure()
+    plt.plot(true_costs)
+    plt.xlabel("Episode")
+    plt.ylabel("True Cost")
+    plt.savefig(os.path.join(logdir, f"true_cost.png"))
     for i, model in enumerate(cost_model.cost_models):
         torch.save(model, os.path.join(logdir, f"cost_network_{i}.pt"))
 
