@@ -13,7 +13,7 @@ def generate_image_encoding(images):
     all_encoded_images = ""
     for i in range(len(images)):
         buf = io.BytesIO()
-        im_resize = im.fromarray(np.transpose(255 * images[i], (1, 2, 0)).astype(np.uint8)).resize((500, 500))
+        im_resize = im.fromarray(np.tile(np.transpose(255 * images[i], (1, 2, 0)), (1, 1, 3)).astype(np.uint8)).resize((500, 500))
         im_resize.save(buf, format='JPEG')
         encoded_string = base64.b64encode(buf.getvalue()).decode('utf-8')
         all_encoded_images += '<img style="position:absolute;" src="data:image/png;base64, {}">'.format(encoded_string)

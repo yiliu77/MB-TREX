@@ -8,7 +8,7 @@ import os
 
 class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
     def __init__(self, params):
-        self._max_episode_steps = 100
+        self._max_episode_steps = 60
         self.num_steps = 0
         self.dims = params["dims"]
         dirname = os.path.dirname(__file__)
@@ -35,6 +35,7 @@ class Hopper(mujoco_env.MujocoEnv, utils.EzPickle):
         rendered_img = self.render(mode="rgb_array")
         rendered_img = rendered_img[50: -50, 50: -50, :]
         rendered_img = cv2.resize(rendered_img, tuple(self.dims))
+        rendered_img = (0.299 * rendered_img[..., 0] + 0.587 * rendered_img[..., 1] + 0.114 * rendered_img[..., 2])[:, :, None]
         return rendered_img
 
     def reset(self):

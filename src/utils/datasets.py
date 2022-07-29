@@ -20,4 +20,8 @@ class SimplePointDataset(data.Dataset):
         states = np.concatenate([states[0][None, ...]] * self.n_past + [states[1:]], axis=0)
         actions = np.concatenate([np.zeros_like(actions[0])[None, ...]] * (self.n_past - 1) + [actions], axis=0)
         rand_index = random.randint(0, length - (self.n_future + 1))
-        return states[rand_index: rand_index + self.seq_length], actions[rand_index: rand_index + self.seq_length]
+
+        states = states[rand_index: rand_index + self.seq_length]
+        actions = np.ascontiguousarray(actions[rand_index: rand_index + self.seq_length])
+        # states = np.ascontiguousarray(0.299 * states[..., 0] + 0.587 * states[..., 1] + 0.114 * states[..., 2])[:, :, :, None]
+        return states, actions

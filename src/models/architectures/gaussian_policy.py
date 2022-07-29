@@ -8,7 +8,7 @@ class ContGaussianPolicy(nn.Module):
     def __init__(self, action_dim, action_range):
         super(ContGaussianPolicy, self).__init__()
         self.embedding = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=(5, 5), stride=(2, 2)),
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=(5, 5), stride=(2, 2)),
             nn.LeakyReLU(),
             nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(5, 5), stride=(2, 2)),
             nn.LeakyReLU(),

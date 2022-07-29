@@ -75,22 +75,37 @@ class CostNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, params):
         super().__init__()
         self.encoder = Encoder(state_dim[2], action_dim, params["enc_dim"])
-        self.fc1 = nn.Linear(params["enc_dim"], params["hidden_dim"])
-        self.fc2 = nn.Linear(params["hidden_dim"], params["hidden_dim"])
-        self.fc3 = nn.Linear(params["hidden_dim"], params["hidden_dim"])
-        self.fc4 = nn.Linear(params["hidden_dim"], 1)
+        # self.fc1 = nn.Linear(params["enc_dim"], params["hidden_dim"])
+        # self.fc2 = nn.Linear(params["hidden_dim"], params["hidden_dim"])
+        # self.fc3 = nn.Linear(params["hidden_dim"], params["hidden_dim"])
+        # self.fc4 = nn.Linear(params["hidden_dim"], 1)
+        self.lstm = nn.LSTM(input_size=params["enc_dim"], hidden_size=params["hidden_dim"], num_layers=1)
+        self.fc = nn.Linear(params["hidden_dim"], 1)
 
-    def get_cost(self, states):
+        self.hidden_state = torch.randn(1, 1, params["hidden_dim"]).cuda()
+        self.cell_state = torch.randn(1, 1, params["hidden_dim"]).cuda()
+
+    def get_cost(self, states, actions):
         t, b, h, w, c = states.shape
+        t, b, a = actions.shape
         states = states.reshape(b * t, h, w, c)
-        x = self.encoder(states, None)
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        r = self.fc4(x)
+        actions = actions.reshape(b * t, a)
+        x = self.encoder(states, actions)[0]
+        # x = torch.relu(self.fc1(x))
+        # x = torch.relu(self.fc2(x))
+        # x = torch.relu(self.fc3(x))
+        # r = self.fc4(x)
+        # r = r.reshape(t, b)
+        # sum_rewards = torch.sum(r, dim=0)
+        # sum_abs_rewards = torch.sum(torch.square(r), dim=0)
+        # return sum_rewards, sum_abs_rewards
+        x = torch.relu(x.reshape(t, b, -1))
+        x = self.lstm(x, (self.hidden_state.repeat(1, b, 1), self.cell_state.repeat(1, b, 1)))[0]
+        x = torch.relu(x.reshape(t * b, -1))
+        r = self.fc(x)
         r = r.reshape(t, b)
         sum_rewards = torch.sum(r, dim=0)
-        sum_abs_rewards = torch.sum(torch.square(r), dim=1)
+        sum_abs_rewards = torch.sum(torch.square(r), dim=0)
         return sum_rewards, sum_abs_rewards
 
 
@@ -105,36 +120,49 @@ class TREX:
 
         self.pref_states1 = None
         self.pref_states2 = None
+        self.pref_actions1 = None
+        self.pref_actions2 = None
         self.pref_labels = None
 
         self.opts = [optim.Adam(self.cost_models[i].parameters(), lr=self.params["lr"]) for i in range(len(self.cost_models))]
 
-    def get_value(self, states):
+    def get_value(self, states, actions):
         with torch.no_grad():
-            costs = torch.mean(torch.cat([self.cost_models[i].get_cost(states)[0].unsqueeze(1)
+            costs = torch.mean(torch.cat([self.cost_models[i].get_cost(states, actions)[0].unsqueeze(1)
                                           for i in range(len(self.cost_models))], dim=1), dim=1)
         return costs
 
-    def calc_distribution(self, query_states):
+    def calc_distribution(self, query_states, query_actions):
+        total_all_distributions = []
+        total_pair_indices = []
+
         with torch.no_grad():
-            pair_indices = [random.sample(range(query_states.shape[1]), k=2) for _ in range(self.params["num_generated_pairs"])]
-            query_states = torch.as_tensor(query_states, dtype=torch.float32).to(self.device)
-            cost_trajs = torch.cat([self.cost_models[i].get_cost(query_states)[0].unsqueeze(1) for i in range(len(self.cost_models))], dim=1).cpu().numpy()
+            for _ in range(self.params["num_generated_pairs"] // 64):
+                pair_indices = [random.sample(range(query_states.shape[1]), k=2) for _ in range(64)]
+                query_states = torch.as_tensor(query_states, dtype=torch.float32).to(self.device)
+                query_actions = torch.as_tensor(query_actions, dtype=torch.float32).to(self.device)
+                cost_trajs = torch.cat([self.cost_models[i].get_cost(query_states, query_actions)[0].unsqueeze(1) for i in range(len(self.cost_models))], dim=1).cpu().numpy()
 
-            all_distributions = []
-            for triplet_index in pair_indices:
-                distributions = []
-                for i in range(len(self.cost_models)):
-                    sampled_cost1 = cost_trajs[triplet_index[0]][i]
-                    sampled_cost2 = cost_trajs[triplet_index[1]][i]
-                    probs = special.softmax([sampled_cost1, sampled_cost2])
-                    distributions.append(probs)
-                all_distributions.append(distributions)
-            all_distributions = np.array(all_distributions)
-            return all_distributions, np.array(pair_indices)
+                all_distributions = []
+                for triplet_index in pair_indices:
+                    distributions = []
+                    for i in range(len(self.cost_models)):
+                        sampled_cost1 = cost_trajs[triplet_index[0]][i]
+                        sampled_cost2 = cost_trajs[triplet_index[1]][i]
+                        probs = special.softmax([sampled_cost1, sampled_cost2])
+                        distributions.append(probs)
+                    all_distributions.append(distributions)
+                all_distributions = np.array(all_distributions)
+                print(all_distributions.shape, np.array(pair_indices).shape)
+                total_all_distributions.append(all_distributions)
+                total_pair_indices.append(np.array(pair_indices))
 
-    def gen_query(self, query_states):
-        all_distributions, pair_indices = self.calc_distribution(query_states)
+        print(len(total_all_distributions))
+        print(np.concatenate(total_all_distributions, axis=0).shape)
+        return np.concatenate(total_all_distributions, axis=0), np.concatenate(total_pair_indices, axis=0)
+
+    def gen_query(self, query_states, query_actions):
+        all_distributions, pair_indices = self.calc_distribution(query_states, query_actions)
         mean = np.mean(all_distributions, axis=1)
 
         if self.params["query_technique"] == "random":
@@ -156,37 +184,50 @@ class TREX:
         indices = np.argpartition(score, -num_queries)[-num_queries:]
         return zip(pair_indices[indices], score[indices])
 
-    def train(self, query_states_np, num_epochs, test_data=None):
-        test_pref_states1, test_pref_states2, test_pref_labels = test_data
+    def train(self, query_states_np, query_actions_np, num_epochs, test_data=None):
+        # test_pref_states1, test_pref_states2, test_pref_actions1, test_pref_actions2, test_pref_labels = test_data
 
-        for (traj1_index, traj2_index), kl_max in self.gen_query(query_states_np):
+        for (traj1_index, traj2_index), kl_max in self.gen_query(query_states_np, query_actions_np):
             query_states1 = query_states_np[:, traj1_index, ...]
             query_states2 = query_states_np[:, traj2_index, ...]
+            query_actions1 = query_actions_np[:, traj1_index, ...]
+            query_actions2 = query_actions_np[:, traj2_index, ...]
             label = self.human.query_preference(query_states1, query_states2)
 
             if self.pref_states1 is None:
                 self.pref_states1 = query_states1[np.newaxis, :]
                 self.pref_states2 = query_states2[np.newaxis, :]
+                self.pref_actions1 = query_actions1[np.newaxis, :]
+                self.pref_actions2 = query_actions2[np.newaxis, :]
                 self.pref_labels = np.array([label])
             self.pref_states1 = np.concatenate([self.pref_states1, query_states1[np.newaxis, :]], axis=0)
             self.pref_states2 = np.concatenate([self.pref_states2, query_states2[np.newaxis, :]], axis=0)
+            self.pref_actions1 = np.concatenate([self.pref_actions1, query_actions1[np.newaxis, :]], axis=0)
+            self.pref_actions2 = np.concatenate([self.pref_actions2, query_actions2[np.newaxis, :]], axis=0)
             self.pref_labels = np.concatenate([self.pref_labels, np.array([label])], axis=0)
-            print("Pairs", self.pref_states1.shape, self.pref_labels.shape)
+            print("Pairs", self.pref_states1.shape, self.pref_labels.shape, self.pref_actions1.shape)
 
-        dataset = TensorDataset(torch.from_numpy(self.pref_states1), torch.from_numpy(self.pref_states2), torch.from_numpy(self.pref_labels))
+        dataset = TensorDataset(torch.from_numpy(self.pref_states1), torch.from_numpy(self.pref_states2), torch.from_numpy(self.pref_actions1), torch.from_numpy(self.pref_actions2),
+                                torch.from_numpy(self.pref_labels))
         dataloader = DataLoader(dataset, batch_size=self.params["batch_size"], shuffle=True, persistent_workers=True, num_workers=10)
 
         log_interval = 10
         for epoch in range(num_epochs):
-            for data_id, (pref_states1_batch, pref_states2_batch, pref_labels_batch) in enumerate(dataloader):
+            for data_id, (pref_states1_batch, pref_states2_batch, pref_actions1_batch, pref_actions2_batch, pref_labels_batch) in enumerate(dataloader):
+                # print(pref_states1_batch.shape)
                 pref_states1_batch = pref_states1_batch.to(self.device).float().permute((1, 0, 2, 3, 4))
+                # print(pref_states1_batch.shape)
                 pref_states2_batch = pref_states2_batch.to(self.device).float().permute((1, 0, 2, 3, 4))
+                pref_actions1_batch = pref_actions1_batch.to(self.device).float().permute((1, 0, 2))
+                # print(pref_actions2_batch)
+                pref_actions2_batch = pref_actions2_batch.to(self.device).float().permute((1, 0, 2))
+                # print(pref_actions2_batch)
                 pref_labels_batch = pref_labels_batch.to(self.device).float()
 
                 log_results = {}
-                avg_results = {"Avg_Pref_Train_Accuracy": 0, "Avg_Pref_Test_Accuracy": 0}
+                avg_results = {"Avg_Pref_Train_Accuracy": 0}
                 for i, cost_model in enumerate(self.cost_models):
-                    (costs1, sq_costs1), (costs2, sq_costs2) = cost_model.get_cost(pref_states1_batch), cost_model.get_cost(pref_states2_batch)
+                    (costs1, sq_costs1), (costs2, sq_costs2) = cost_model.get_cost(pref_states1_batch, pref_actions1_batch), cost_model.get_cost(pref_states2_batch, pref_actions2_batch)
                     cost_probs = torch.softmax(torch.stack([costs1, costs2], dim=1), dim=1)
 
                     loss = pref_labels_batch * cost_probs[:, 0] + (1 - pref_labels_batch) * cost_probs[:, 1]
@@ -211,18 +252,18 @@ class TREX:
                                 log_results["Pref{}/Pref_Train_Accuracy".format(i)] = train_accuracy
                                 avg_results["Avg_Pref_Train_Accuracy"] += train_accuracy
 
-                            indices = np.random.choice(range(test_pref_states1.shape[1]), size=min(self.params["batch_size"], test_pref_states1.shape[1]))
-                            test_pref_states1_batch = test_pref_states1[:, indices, ...]
-                            test_pref_states2_batch = test_pref_states2[:, indices, ...]
-                            test_pref_labels_batch = test_pref_labels[indices].detach().cpu().numpy()
-                            test_pref1_cost = cost_model.get_cost(test_pref_states1_batch)[0].detach().cpu().numpy()
-                            test_pref2_cost = cost_model.get_cost(test_pref_states2_batch)[0].detach().cpu().numpy()
-                            test_non_tie_indices = np.argwhere(test_pref_labels_batch != 0.5)[:, 0]
-
-                            test_accuracy = np.mean(np.equal(np.argmin(np.stack([test_pref1_cost, test_pref2_cost], axis=1), axis=1)[test_non_tie_indices],
-                                                             test_pref_labels_batch[test_non_tie_indices]).astype(np.float32))
-                            log_results["Pref{}/Pref_Test_Accuracy".format(i)] = test_accuracy
-                            avg_results["Avg_Pref_Test_Accuracy"] += test_accuracy
+                            # indices = np.random.choice(range(test_pref_states1.shape[1]), size=min(self.params["batch_size"], test_pref_states1.shape[1]))
+                            # test_pref_states1_batch = test_pref_states1[:, indices, ...]
+                            # test_pref_states2_batch = test_pref_states2[:, indices, ...]
+                            # test_pref_labels_batch = test_pref_labels[indices].detach().cpu().numpy()
+                            # test_pref1_cost = cost_model.get_cost(test_pref_states1_batch)[0].detach().cpu().numpy()
+                            # test_pref2_cost = cost_model.get_cost(test_pref_states2_batch)[0].detach().cpu().numpy()
+                            # test_non_tie_indices = np.argwhere(test_pref_labels_batch != 0.5)[:, 0]
+                            #
+                            # test_accuracy = np.mean(np.equal(np.argmin(np.stack([test_pref1_cost, test_pref2_cost], axis=1), axis=1)[test_non_tie_indices],
+                            #                                  test_pref_labels_batch[test_non_tie_indices]).astype(np.float32))
+                            # log_results["Pref{}/Pref_Test_Accuracy".format(i)] = test_accuracy
+                            # avg_results["Avg_Pref_Test_Accuracy"] += test_accuracy
 
                 if data_id == 0 and epoch % log_interval == 0:
                     for k, v in avg_results.items():

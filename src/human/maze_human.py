@@ -6,7 +6,8 @@ import wandb
 class MazeHuman(Human):
     def __init__(self, env):
         self.env = env
-        self.mid_point = self.calc_coords(np.transpose(self.env.reset(pos=(0.12, 0.12)), (2, 0, 1)) / 255)
+        self.initial_state = self.env.get_empty() / 256
+        self.mid_point = self.calc_coords(np.transpose(self.env.reset(pos=(0.12, 0.12))[0], (2, 0, 1)) / 255)
         self.goal = self.calc_coords(np.transpose(self.env.get_goal(), (2, 0, 1)) / 255)
         print(self.goal, self.mid_point)
 
@@ -34,8 +35,12 @@ class MazeHuman(Human):
             wandb.log({"Queries": wandb.Image(comb_seqs, caption="Query Score {}, {}".format(score1 / paired_states1.shape[0], score2 / paired_states1.shape[0]))})
         return label
 
-    @staticmethod
-    def calc_coords(frame):
-        state = np.logical_and(frame[0, :, :] > 0.5, frame[1, :, :] < 0.5)
-        x, y = np.argwhere(state).mean(0)
+    def calc_coords(self, frame):
+        from matplotlib import pyplot as plt
+        diff = np.transpose(frame, (1, 2, 0)) - self.initial_state
+        plt.imshow(diff)
+        plt.show()
+        x, y = np.argwhere(diff[:, :, 0] > 0.15).mean(0)
+        if np.isnan(x):
+            return 0, 0
         return x, y

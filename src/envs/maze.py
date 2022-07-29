@@ -38,6 +38,25 @@ class Maze(Env, utils.EzPickle):
     def get_goal(self):
         self.sim.data.qpos[0] = self.goal[0]
         self.sim.data.qpos[1] = self.goal[1]
+        w1 = -0.08  # np.random.uniform(-0.2, 0.2)
+        w2 = 0.08  # np.random.uniform(-0.2, 0.2)
+        self.sim.model.geom_pos[5, 1] = 0.5 + w1
+        self.sim.model.geom_pos[7, 1] = -0.25 + w1
+        self.sim.model.geom_pos[6, 1] = 0.4 + w2
+        self.sim.model.geom_pos[8, 1] = -0.25 + w2
+        self.sim.forward()
+        obs = self._get_obs()
+        return obs
+
+    def get_empty(self):
+        self.sim.data.qpos[0] = 100
+        self.sim.data.qpos[1] = 100
+        w1 = -0.08  # np.random.uniform(-0.2, 0.2)
+        w2 = 0.08  # np.random.uniform(-0.2, 0.2)
+        self.sim.model.geom_pos[5, 1] = 0.5 + w1
+        self.sim.model.geom_pos[7, 1] = -0.25 + w1
+        self.sim.model.geom_pos[6, 1] = 0.4 + w2
+        self.sim.model.geom_pos[8, 1] = -0.25 + w2
         self.sim.forward()
         obs = self._get_obs()
         return obs
@@ -55,7 +74,7 @@ class Maze(Env, utils.EzPickle):
         self.sim.data.qvel[:] = 0
 
         self.steps += 1
-        done = self.steps >= self.horizon  # or self.get_distance_score() < self.goal_thresh  # NOTE: not calling done signal when in goal set to make all eps fixed length?
+        done = self.steps >= self.horizon   # NOTE: not calling done signal when in goal set to make all eps fixed length?
         cost = self.get_distance_score()
 
         info = {
@@ -63,13 +82,15 @@ class Maze(Env, utils.EzPickle):
             "state": cur_obs,
             "next_state": obs,
             "action": action,
-            "gt_state": gt_state
+            "success": self.get_distance_score() < 0.03,
+            "lowdim": gt_state
         }
         return obs, -cost, done, info
 
     def _get_obs(self):
         rendered_img = self.sim.render(64, 64, camera_name="cam0")
         rendered_img[rendered_img[:, :, 0] > 200] = [255, 0, 0]
+        rendered_img = (0.299 * rendered_img[..., 0] + 0.587 * rendered_img[..., 1] + 0.114 * rendered_img[..., 2])[:, :, None]
         return rendered_img
 
     def reset(self, check_constraint=True, pos=()):
@@ -103,7 +124,8 @@ class Maze(Env, utils.EzPickle):
         if constraint and check_constraint:
             if not len(pos):
                 return self.reset(check_constraint=check_constraint)
-        return self._get_obs()
+        gt_state = np.concatenate([self.sim.data.qpos[:].copy(), self.sim.data.qvel[:].copy()])
+        return self._get_obs(), {"lowdim": gt_state}
 
     def get_distance_score(self):
         d = np.sqrt(np.mean((self.goal - self.sim.data.qpos[:]) ** 2))
@@ -121,13 +143,14 @@ class Maze(Env, utils.EzPickle):
         y_pts = int(x_pts * (x_bounds[1] - x_bounds[0]) / (y_bounds[1] - y_bounds[0]))
         for x in np.linspace(x_bounds[0], x_bounds[1], y_pts):
             for y in np.linspace(y_bounds[0], y_bounds[1], x_pts):
-                obs = self.reset(pos=(x, y))
+                obs = self.reset(pos=(x, y))[0]
                 states.append(obs)
 
         with torch.no_grad():
             states = torch.as_tensor(np.array(states)[None, :, :, :, :]).float().to("cuda")
             states = states.permute((0, 1, 4, 2, 3)) / 255
-            costs = cost_model.get_value(states)
+            actions = torch.as_tensor(self.action_space.sample()).repeat(1, states.shape[1], 1).to("cuda").float()
+            costs = torch.mean(torch.stack([cost_model.get_value(states, actions) for _ in range(10)], dim=0), dim=0)
             costs = (costs - torch.min(costs)) / (torch.max(costs) - torch.min(costs))
 
             grid = costs.detach().cpu().numpy()

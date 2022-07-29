@@ -17,7 +17,7 @@ def create_virtual_dataset(folder_path):
     dataset_size = 0
     max_length = 0
     for i, file_name in enumerate(os.listdir(folder_path)):
-        if "virtual" not in file_name:
+        if "virtual" not in file_name and "lowdim" not in file_name:
             dataset_size += len(h5py.File(os.path.join(folder_path, file_name), 'r')["images"])
             max_length = max(max_length, h5py.File(os.path.join(folder_path, file_name), 'r')["images"].shape[1])
             print(file_name, max_length, len(h5py.File(os.path.join(folder_path, file_name), 'r')["images"]))
@@ -26,7 +26,7 @@ def create_virtual_dataset(folder_path):
     f = h5py.File(os.path.join(folder_path, "virtual_transition_data.h5"), 'w')
     curr_size, virtual_layout_created = 0, False
     for i, file_name in enumerate(os.listdir(folder_path)):
-        if "virtual" not in file_name:
+        if "virtual" not in file_name and "lowdim" not in file_name:
             path = os.path.join(folder_path, file_name)
             start = h5py.File(path, 'r')
             if not virtual_layout_created:
@@ -53,22 +53,22 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     with open(sys.argv[1], 'r') as stream:
         params = yaml.safe_load(stream)
-    wandb.init(project="MB-TREX", entity="yiliu77", config=params)
+    wandb.init(project="MB-TREX", entity="yiliu77", config=params, name="SVG Training")
 
     env = create_env(params["env"])
 
-    model = SVG(env.observation_space, env.action_space.shape[0], params["video_model"])
+    model = SVG((64, 64, 1), env.action_space.shape[0], params["video_model"])
     video_dir_name = f"./saved/{params['env']['type']}/{model.type}/"
+    model.to_half()
     # model.load(video_dir_name + "svg.pt")  # TODO  remove
 
     create_virtual_dataset("saved/{}/data/".format(params["env"]["type"]))
     dataset = SimplePointDataset("saved/{}/data/virtual_transition_data.h5".format(params["env"]["type"]), params["video_model"]["n_past"], params["video_model"]["n_future"])
 
     # Model directory
-    dir_name = f"./saved/{params['env']['type']}/{model.type}/"
-    if not os.path.isdir(dir_name):
-        os.makedirs(dir_name)
+    if not os.path.isdir(video_dir_name):
+        os.makedirs(video_dir_name)
 
     # Train model
-    model.train(params["video_model"]["epochs"], dataset)
-    model.save(dir_name + "svg.pt")
+    model.train(params["video_model"]["epochs"], dataset, video_dir_name)
+    model.save(video_dir_name + "svg.pt")

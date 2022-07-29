@@ -6,7 +6,7 @@ env:
 
 gather_env:
   type: "maze"
-  start: "anywhere"
+  start: "left"
   horizon: 30
   max_force: 0.3
 
@@ -28,7 +28,7 @@ video_model:
   beta: 0.001
   last_frame_skip: True
 
-  epochs: 60
+  epochs: 200
   batch_size: 64
   lr: 0.002
   train_test_split: 0.9
@@ -44,10 +44,10 @@ cost_model:
   ensemble_size: 3
 
   query_technique: "infogain"
-  num_generated_pairs: 30
+  num_generated_pairs: 1000
   query_batch_size: 20
   batch_size: 32
-  regularization: 0.1
+  regularization: 0.01 # 0.1 for normal
 
   hidden_size: 64
   lr: 0.002

@@ -1,21 +1,21 @@
-CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 10 &
-CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 11 &
-CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 12 &
+CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 20 True &
+CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 21 False &
+CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 22 False &
 
 wait
 
-CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 13 &
-CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 14 &
-CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 15 &
+CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 23 True &
+CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 24 False &
+CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 25 False &
 
 wait
 
-CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 16 &
-CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 17 &
-CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 18 &
+CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 26 True &
+CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 27 False &
+CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 28 False &
 
 wait
 
-CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 19 &
-CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 20 &
-CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 21 &
+CUDA_VISIBLE_DEVICES=0 python3 ../generate_data.py ../../config/hopper.yaml 29 True &
+CUDA_VISIBLE_DEVICES=1 python3 ../generate_data.py ../../config/hopper.yaml 30 False &
+CUDA_VISIBLE_DEVICES=2 python3 ../generate_data.py ../../config/hopper.yaml 31 False &

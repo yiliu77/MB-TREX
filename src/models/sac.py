@@ -15,10 +15,11 @@ from models.rnd import *
 
 class ContSAC:
     def __init__(self, action_dim, env, device, memory_size=2e2, warmup_games=10, batch_size=64, lr=0.0001, gamma=0.99, tau=0.003, alpha=0.2,
-                 ent_adj=False, target_update_interval=1, n_games_til_train=1, n_updates_per_train=2):
+                 ent_adj=False, target_update_interval=1, n_games_til_train=1, n_updates_per_train=2, use_random_actions=False):
         self.device = device
         self.gamma = gamma
         self.batch_size = batch_size
+        self.use_random_actions = use_random_actions
 
         self.memory_size = memory_size
         self.warmup_games = warmup_games
@@ -40,8 +41,8 @@ class ContSAC:
         for param in self.rnd_target.parameters():
             param.requires_grad = False
 
-        self.normalization = RunningMeanStd(shape=(1, 64, 64, 3))
-        self.reward_normalization = RunningMeanStd()
+        self.normalization = RunningMeanStdNp(shape=(1, 64, 64, 1))
+        self.reward_normalization = RunningMeanStdNp()
 
         self.tau = tau
         self.gamma = gamma
@@ -152,7 +153,7 @@ class ContSAC:
             states_lowdim = []
             state, info = self.env.reset()
             while not done:
-                if i <= 2 * self.warmup_games or random.random() < 0.1:
+                if i <= 2 * self.warmup_games or random.random() < 0.1 or self.use_random_actions:
                     action = self.env.action_space.sample()
                 else:
                     action = self.get_action(state, deterministic)
@@ -214,7 +215,7 @@ class ContSAC:
                 # traverse_images = wandb.Image(np.max(states, axis=0), caption="Traverse")
                 wandb.log({"Sequences": gen_images})
 
-            if i >= 2 * self.warmup_games:
+            if i >= 2 * self.warmup_games and not self.use_random_actions:
                 if i % self.n_games_til_train == 0:
                     for j in range(n_steps * self.n_updates_per_train):
                         self.total_train_steps += 1

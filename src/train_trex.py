@@ -5,6 +5,7 @@ import time
 
 import socket
 import h5py
+from itertools import combinations, product
 import numpy as np
 import torch
 import wandb
@@ -13,7 +14,7 @@ import yaml
 from models.svg import SVG
 from models.trex import TREX
 from models.visualmpc import VisualMPC
-from utils.input_utils import create_pref_validation
+from models.bc import BCEnsemble
 from utils.parser import create_env, create_human
 
 
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     np.random.seed(123)
     random.seed(123)
 
-    wandb.init(project="MB-TREX", entity="yiliu77", config=params)
+    wandb.init(project="MB-TREX", entity="yiliu77", config=params, name="TREX")
 
     env = create_env(params["env"])
     human = create_human(params["human"], env)
@@ -58,46 +59,112 @@ if __name__ == "__main__":
         os.makedirs("saved/{}/TREX/reward_visualization/".format(params["env"]["type"]))
     env.visualize_rewards("saved/{}/TREX/reward_visualization/initial.png".format(params["env"]["type"]), cost_model)
 
-    with h5py.File("saved/{}/data/transition_data2.hdf5".format(params["env"]["type"]), 'r') as f:
+    with h5py.File("saved/{}/data/transition_data1.hdf5".format(params["env"]["type"]), 'r') as f:
         all_states = np.array(f['images'])
         all_actions = np.array(f['actions'])
+    # all_states = (0.299 * all_states[..., 0] + 0.587 * all_states[..., 1] + 0.114 * all_states[..., 2])[:, :, :, :, None]
     print(all_actions.shape, all_states.shape, np.max(all_states), np.min(all_states))
     all_states = np.transpose(all_states, (1, 0, 4, 2, 3)) / 255
     all_actions = np.transpose(all_actions, (1, 0, 2))
     print(all_actions.shape, all_states.shape, np.max(all_states), np.min(all_states))
 
-    test_data = create_pref_validation(all_states, human)
+    # test_data = create_pref_validation(all_states, human)
 
     video_model = SVG(env.observation_space, env.action_space.shape[0], params["video_model"])
     video_dir_name = f"./saved/{params['env']['type']}/{video_model.type}/"
     video_model.load(video_dir_name + "svg.pt")
     visualmpc = VisualMPC(video_model, cost_model.get_value, params["env"]["horizon"], env, params["visualmpc"])
-    visualmpc.normalization.update(np.transpose(all_states[:, 0, ...], (0, 2, 3, 1)))
+    visualmpc.normalization.update(torch.as_tensor(np.transpose(all_states[:, 0, ...], (0, 2, 3, 1))).cuda())
 
     all_query_states = np.empty((params["visualmpc"]["future_frames"], 0, all_states.shape[2], all_states.shape[3], all_states.shape[4]))
+    all_query_actions = np.empty((params["visualmpc"]["future_frames"], 0, all_actions.shape[2]))
+
+    # # ############ PRETRAINING ############
+    # bc = BCEnsemble(device)
+    # demo_trajs = []
+    # demo_states = []
+    # demo_acs = []
+    #
+    # for i in range(params["cost_model"]["offline_demos"]):
+    #     demo = human.get_demo()
+    #     demo_states.extend(demo["obs"][:-1])
+    #     demo_acs.extend(demo["acs"])
+    #     demo_trajs.append([demo["obs"][:-1], demo["acs"], demo["obs"][1:]])
+    #
+    # bc_trajs = []
+    # eps = np.linspace(0, 0.75, num=4)
+    #
+    # if params["cost_model"]["bc_comp_mode"] == "all":
+    #     start = env.reset()
+    #     costs = [[] for _ in range(len(eps))]
+    #     for i, e in enumerate(eps):
+    #         bc_trajs.append([])
+    #         for k in range(5):
+    #             states, acs = [], []
+    #             s = start
+    #             traj = []
+    #             for t in range(env.horizon):
+    #                 states.append(s)
+    #                 state_torch = torch.from_numpy(s).float().to(device)
+    #                 if np.random.random() < e:
+    #                     a = torch.from_numpy(env.action_space.sample()).float().to(device)
+    #                 else:
+    #                     a = bc.predict(state_torch).squeeze()
+    #                 acs.append(a.detach().cpu().squeeze().numpy())
+    #                 next_s = video_model.predict_states(torch.unsqueeze(torch.cat((state_torch, a)), dim=0))
+    #                 s = next_s.detach().cpu().squeeze().numpy()
+    #             traj = [np.array(states), np.array(acs)]
+    #             bc_trajs[-1].append(traj)
+    #             costs[i].append(env.get_expert_cost([traj[0][-1]])[0])
+    #
+    #     costs = np.array(costs)
+    #     avg_costs = np.mean(costs, axis=1)
+    #     std_costs = np.std(costs, axis=1)
+    #     states1 = []
+    #     acs1 = []
+    #     states2 = []
+    #     acs2 = []
+    #     bc_labels = []
+    #
+    #     for traj_set_1, traj_set_2 in combinations([demo_trajs] + bc_trajs, 2):
+    #         for traj1, traj2 in product(traj_set_1, traj_set_2):
+    #             states1.append(np.array(traj1)[0, :])
+    #             acs1.append(np.array(traj1)[1, :])
+    #             states2.append(np.array(traj2)[0, :])
+    #             acs2.append(np.array(traj2)[1, :])
+    #             bc_labels.append(0)
+
+    # ############ TRAINING LOOP ############
     mpc_states, mpc_actions = [], []
     for iteration in range(1000):
         traj_states = []
         avg_rewards = []
-        for _ in range(3): # TODO
+        for _ in range(8):  # TODO
             wandb.log({# "VisualMPC/RND Visualization": visualize_rnd(env, visualmpc.rnd, visualmpc.rnd_target, visualmpc.normalization),
-                       "VisualMPC/Normalization": wandb.Image(visualmpc.normalization.mean[0])})
+                       "VisualMPC/Normalization": wandb.Image(visualmpc.normalization.mean.cpu().numpy()[0])})
             states, actions = [], []
-            state, done, t = env.reset(), False, 0
+            state, done, t = env.reset()[0], False, 0
+            all_query_states_list, all_query_actions_list = [], []
             while not done:
-                action, query_states_list = visualmpc.act(state, t)
                 start = time.time()
+                action, query_states_list, query_actions_list = visualmpc.act(state, t)
                 next_state, reward, done, info = env.step(action)
-                print(t, action, reward)
+                print(t, action, reward, time.time() - start)
                 states.append(state)
                 actions.append(action)
                 avg_rewards.append(reward)
 
                 state = next_state
+                if t % (params["visualmpc"]["future_frames"] // 2) == 0:
+                    all_query_states_list.append((query_states_list, t))
+                    all_query_actions_list.append((query_actions_list, t))
                 t += 1
-                if t % params["visualmpc"]["future_frames"] == 0:
-                    for query_states in query_states_list:
+
+            for (query_states_list, curr_t1), (query_actions_list, curr_t2) in zip(all_query_states_list, all_query_actions_list):
+                if curr_t1 + params["visualmpc"]["future_frames"] < t and curr_t2 + params["visualmpc"]["future_frames"] < t:
+                    for query_states, query_actions in zip(query_states_list, query_actions_list):
                         all_query_states = np.concatenate([all_query_states, query_states[:, None, :, :, :]], axis=1)
+                        all_query_actions = np.concatenate([all_query_actions, query_actions[:, None, :]], axis=1)
 
             states = np.array(states)
             all_trajectory_imgs = wandb.Image(np.reshape(states, (states.shape[0] * states.shape[1], states.shape[2], states.shape[3])), caption="Sequences")
@@ -127,10 +194,10 @@ if __name__ == "__main__":
         #     video_model.train_step(torch.as_tensor(train_video_states), torch.as_tensor(train_video_actions))
 
         start = time.time()
-        cost_model.train(all_query_states, 50, test_data=test_data)
+        cost_model.train(all_query_states, all_query_actions, 60, test_data=None)
         print("train total", time.time() - start)
         start = time.time()
         env.visualize_rewards("saved/{}/TREX/reward_visualization/image{}.png".format(params["env"]["type"], iteration), cost_model)
         print("visualize", time.time() - start)
 
-        cost_model.save("saved/{}/TREX/save.pt".format(params["env"]["type"]))
+        cost_model.save("saved/{}/TREX/save{}.pt".format(params["env"]["type"], iteration))

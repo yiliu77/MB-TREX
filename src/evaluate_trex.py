@@ -21,7 +21,7 @@ if __name__ == "__main__":
     human = create_human(params["human"], env)
 
     cost_model = TREX(human, env.observation_space, env.action_space.shape[0], params["cost_model"])
-    cost_model.load("saved/{}/TREX/save.pt".format(params["env"]["type"]))
+    cost_model.load("saved/{}/TREX/save8.pt".format(params["env"]["type"]))
     env.visualize_rewards("saved/{}/TREX/evaluation.png".format(params["env"]["type"]), cost_model)
 
     video_model = SVG(env.observation_space, env.action_space.shape[0], params["video_model"])
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     while True:
         all_states = []
-        state = env.reset()
+        state = env.reset()[0]
         t = 0
         done = False
         while not done:

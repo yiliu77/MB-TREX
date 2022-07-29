@@ -8,6 +8,7 @@ import wandb
 from torch import optim
 from torch.optim.lr_scheduler import *
 from torch.utils.data import DataLoader
+import random
 
 
 class ConvBlock(nn.Module):
@@ -37,7 +38,7 @@ class UpConvBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_channels, action_dim, output_dim):
+    def __init__(self, input_channels, output_dim):
         super(Encoder, self).__init__()
         nf = 64
         # input is (nc) x 64 x 64
@@ -54,10 +55,10 @@ class Encoder(nn.Module):
             nn.BatchNorm2d(output_dim),
             nn.Tanh()
         )
-        self.hidden = nn.Sequential(nn.Linear(128 + action_dim, 128),
-                                    nn.Tanh())
+        # self.hidden = nn.Sequential(nn.Linear(128 + action_dim, 128),
+        #                             nn.Tanh())
 
-    def forward(self, input, action):
+    def forward(self, input):
         h1 = self.c1(input)
         h2 = self.c2(h1)
         h3 = self.c3(h2)
@@ -65,11 +66,11 @@ class Encoder(nn.Module):
         h5 = self.c5(h4)
         h6 = h5.view(h5.shape[0], -1)
 
-        if action is None:
-            return h6
-
-        h6 = torch.cat([h6, action], dim=1)
-        h6 = self.hidden(h6)
+        # if action is None:
+        #     return h6
+        #
+        # h6 = torch.cat([h6, action], dim=1)
+        # h6 = self.hidden(h6)
         return h6, [h1, h2, h3, h4]
 
 
@@ -188,10 +189,10 @@ class SVG:
         self.last_frame_skip = params["last_frame_skip"]
         self.beta = params["beta"]
 
-        self.encoder = Encoder(state_dim[2], action_dim, params["enc_dim"]).to(self.device)
+        self.encoder = Encoder(state_dim[2], params["enc_dim"]).to(self.device)
         self.decoder = Decoder(params["enc_dim"], state_dim[2]).to(self.device)
 
-        self.frame_predictor = LSTM(params["enc_dim"] + params["z_dim"], params["enc_dim"], params["rnn_size"],
+        self.frame_predictor = LSTM(params["enc_dim"] + params["z_dim"] + action_dim, params["enc_dim"], params["rnn_size"],
                                     params["predictor_rnn_layers"], params["batch_size"]).to(self.device)
         self.prior = GaussianLSTM(params["enc_dim"], params["z_dim"], params["rnn_size"], params["prior_rnn_layers"],
                                   params["batch_size"]).to(self.device)
@@ -220,42 +221,49 @@ class SVG:
                 2 * log_var2.exp()) - 1 / 2
         return torch.mean(KLD)
 
-    def create_encoding(self, states, actions):
-        with torch.no_grad():
-            if len(states.shape) == 4:
-                return self.encoder(states, actions)[0].detach()  # TODO pull out action
-            elif len(states.shape) == 5:
-                reshaped_states = states.reshape(-1, states.shape[2], states.shape[3], states.shape[4])
-                reshaped_actions = actions.reshape(-1, actions.shape[2])
-                return self.encoder(reshaped_states, reshaped_actions)[0].reshape(states.shape[0], states.shape[1], -1).detach()
-            else:
-                raise NotImplementedError
+    # def create_encoding(self, states, actions):
+    #     with torch.no_grad():
+    #         if len(states.shape) == 4:
+    #             return self.encoder(states, actions)[0].detach()
+    #         elif len(states.shape) == 5:
+    #             reshaped_states = states.reshape(-1, states.shape[2], states.shape[3], states.shape[4])
+    #             reshaped_actions = actions.reshape(-1, actions.shape[2])
+    #             return self.encoder(reshaped_states, reshaped_actions)[0].reshape(states.shape[0], states.shape[1], -1).detach()
+    #         else:
+    #             raise NotImplementedError
 
     def predict_states(self, start_states, actions, horizon):
+        gen_seqs = []
+
         assert len(start_states) == self.n_past
         with torch.no_grad():
             self.frame_predictor.hidden = self.frame_predictor.init_hidden()
             self.prior.hidden = self.prior.init_hidden()
             self.posterior.hidden = self.posterior.init_hidden()
 
-            gen_seq = copy.deepcopy(start_states) # TODO fix actions being too short (n_past actions are actually n_future)
-
-            x_in = None
-            for i in range(horizon - 1):
-                if i < self.n_past:
-                    h, h_skip = self.encoder(start_states[i], actions[i])
-                else:
-                    h, h_skip = self.encoder(x_in, actions[i])
-
+            gen_seqs.append(start_states[0].clone())
+            x_in = start_states[0]
+            for i in range(1, horizon):
+                h, h_skip = self.encoder(x_in)
                 if self.last_frame_skip or i < self.n_past:
                     h, skip = h, h_skip
                 else:
                     h, _ = h, h_skip
-                z_t, _, _ = self.prior(h)
-                h = self.frame_predictor(torch.cat([h, z_t], 1)).detach()
-                x_in = self.decoder([h, skip]).detach()
-                gen_seq.append(x_in)
-            return torch.stack(gen_seq)
+                if i < self.n_past:
+                    h_target = self.encoder(start_states[i])[0].detach()
+                    z_t, _, _ = self.posterior(h_target)
+                    self.prior(h)
+                    self.frame_predictor(torch.cat([h, z_t, actions[i - 1]], 1))
+
+                    x_in = start_states[i]
+                    gen_seqs.append(x_in.clone())
+                else:
+                    z_t, _, _ = self.prior(h)
+                    h = self.frame_predictor(torch.cat([h, z_t, actions[i - 1]], 1))
+                    x_in = self.decoder([h, skip])
+                    gen_seqs.append(x_in.clone())
+
+            return torch.stack(gen_seqs)
 
     def loss(self, sequences, actions):
         sequences = sequences.permute((1, 0, 4, 2, 3))
@@ -268,17 +276,23 @@ class SVG:
 
         mse = 0
         kld = 0
+        x_in = None
         for i in range(1, self.n_past + self.n_future):
-            h, h_skip = self.encoder(sequences[i - 1], actions[i - 1])
-            h_target, _ = self.encoder(sequences[i], actions[i])
+            if x_in is not None and i >= self.n_past and random.random() < 0.1:
+                h, h_skip = self.encoder(x_in)
+            else:
+                h, h_skip = self.encoder(sequences[i - 1])
+
+            h_target, _ = self.encoder(sequences[i])
             if self.last_frame_skip or i < self.n_past:
                 h, skip = h, h_skip
             else:
                 h, _ = h, h_skip
             _, mu_p, logvar_p = self.prior(h)
             z_t, mu, logvar = self.posterior(h_target)
-            h_pred = self.frame_predictor(torch.cat([h, z_t], 1))
+            h_pred = self.frame_predictor(torch.cat([h, z_t, actions[i - 1]], 1))
             x_pred = self.decoder([h_pred, skip])
+            x_in = x_pred.detach().clone()
             mse += self.rec_loss(x_pred, sequences[i])
             kld += self.kl_div(mu, logvar, mu_p, logvar_p)
 
@@ -297,8 +311,8 @@ class SVG:
         self.prior.train()
         self.posterior.train()
 
-        sequences = sequences.to(self.device).float()
-        actions = actions.to(self.device).float()
+        sequences = sequences.to(self.device)
+        actions = actions.to(self.device)
 
         self.encoder_opt.zero_grad()
         self.decoder_opt.zero_grad()
@@ -317,7 +331,7 @@ class SVG:
 
         return loss.item()
 
-    def train(self, num_epochs, dataset):
+    def train(self, num_epochs, dataset, video_dir_name):
         train_len = int(self.params["train_test_split"] * len(dataset))
         val_len = int(len(dataset) - train_len)
         train_data, val_data = torch.utils.data.random_split(dataset, [train_len, val_len])
@@ -340,8 +354,8 @@ class SVG:
                 losses.append(self.train_step(sequences, actions))
 
             for sequences, actions in val_loader:
-                sequences = sequences.to("cuda").float()
-                actions = actions.to("cuda").float()
+                sequences = sequences.to("cuda").float().contiguous()
+                actions = actions.to("cuda").float().contiguous()
                 self.validate(sequences, actions)
                 break
 
@@ -350,6 +364,8 @@ class SVG:
             self.frame_predictor_scheduler.step()
             self.prior_scheduler.step()
             self.posterior_scheduler.step()
+
+            self.save(video_dir_name + "temp_svg.pt")
 
             wandb.log({"LR": self.encoder_opt.state_dict()['param_groups'][0]['lr']})
 
@@ -370,19 +386,24 @@ class SVG:
 
                 gen_seqs[s].append(sequences[0].cpu().numpy())
                 x_in = sequences[0]
-                for i in range(len(sequences) - 1):
-                    h, h_skip = self.encoder(x_in, actions[i])
+                for i in range(1, len(sequences)):
+                    h, h_skip = self.encoder(x_in)
                     if self.last_frame_skip or i < self.n_past:
                         h, skip = h, h_skip
                     else:
                         h, _ = h, h_skip
                     if i < self.n_past:
+                        h_target = self.encoder(sequences[i])[0].detach()
+                        z_t, _, _ = self.posterior(h_target)
+                        self.prior(h)
+                        self.frame_predictor(torch.cat([h, z_t, actions[i - 1]], 1))
+
                         x_in = sequences[i]
                         gen_seqs[s].append(x_in.cpu().numpy())
                     else:
                         z_t, _, _ = self.prior(h)
-                        h = self.frame_predictor(torch.cat([h, z_t], 1)).detach()
-                        x_in = self.decoder([h, skip]).detach()
+                        h = self.frame_predictor(torch.cat([h, z_t, actions[i - 1]], 1))
+                        x_in = self.decoder([h, skip])
                         gen_seqs[s].append(x_in.cpu().numpy())
 
             gen_seqs = np.transpose(np.array(gen_seqs), (0, 2, 1, 4, 5, 3))
@@ -432,3 +453,6 @@ class SVG:
             "prior": self.prior,
             "posterior": self.posterior
         }, f)
+
+    def to_half(self):
+        pass
