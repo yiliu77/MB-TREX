@@ -108,9 +108,11 @@ class TRexCost:
     def get_value(self, states, actions=None):
         if not torch.is_tensor(states):
             states = torch.from_numpy(states).float().to(self.device)
+        states = states.to(self.device)
         if actions is not None:
             if not torch.is_tensor(actions):
-                actions = torch.from_numpy(actions).float().to(self.device)
+                actions = torch.from_numpy(actions).float()
+            actions = actions.to(self.device)
             inputs = self.preprocess(states, actions) # for compatibility
         else:
             inputs = states

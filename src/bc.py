@@ -115,18 +115,6 @@ class BCEnsemble:
             return [np.array(states[:-1]), np.array(acs[:-1]), np.array(states[1:])]
 
 
-# env.reset(pos=(-1, -1))
-# background = cv2.resize(env._get_obs(images=True), (100, 100))
-# plt.figure()
-# plt.imshow(background, extent=[0, 100, 100, 0])
-# plt.plot(demo["obs"][:-1, 0] * 100 / 0.6 + 50, demo["obs"][:-1, 1]  * 100 / 0.6 + 50)
-# plt.plot(bc_trajs[-1][2][:, 0] * 100 / 0.6 + 50, bc_trajs[-1][2][:, 1]  * 100 / 0.6 + 50)
-# plt.plot(eps_trajs[-1][2][:, 0] * 100 / 0.6 + 50, eps_trajs[-1][2][:, 1]  * 100 / 0.6 + 50)
-# plt.savefig(os.path.join(logdir, "pl.png"))
-
-
-
-
 if __name__ == '__main__':
     with open(sys.argv[1], 'r') as stream:
         params = yaml.safe_load(stream)

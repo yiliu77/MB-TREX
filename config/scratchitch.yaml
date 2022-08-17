@@ -23,8 +23,8 @@ dynamics_model:
   num_cores: 10
   online_update_freq: 10000
   use_cached: True
-  save_obs: "obs_aug"
-  save_acs: "acs_aug"
+  save_obs: "obs_red"
+  save_acs: "acs_red"
 mpc:
   cem_iters: 5
   cem_pop_size: 200
@@ -39,7 +39,7 @@ cost_model:
   offline_demos: 0
   bc_warm_start: False
   episodes: 100
-  regularization: 0.0
+  regularization: 0.1
   hidden_dim: 512
   lr: 0.0002
   query_batch_size: 10

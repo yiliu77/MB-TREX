@@ -15,7 +15,7 @@ human:
 dynamics_model:
   num_dynamics_iters: 120000
   gt_dynamics: False
-  epochs: 50
+  epochs: 100
   batch_size: 32
   lr: 0.001
   train_test_split: 0.9
@@ -30,10 +30,9 @@ cost_model:
   regularization: 0.0
   lr: 0.0002
   use_images: False
-  episodes: 200
+  episodes: 100
   offline_demos: 0
-  bc_comp_mode: "same"
-  bc_warm_start: False
+  drex_pretrain: False
   pretrain_epochs: 10
   state_only: True
   gt_cost: False

@@ -67,7 +67,7 @@ if __name__ == "__main__":
         demo_acs.extend(demo["acs"])
         demo_trajs.append([demo["obs"][:-1], demo["acs"], demo["obs"][1:]])
 
-    if params["cost_model"]["bc_warm_start"]:
+    if params["cost_model"]["drex_pretrain"]:
         states_np = np.vstack(demo_states)
         actions_np = np.vstack(demo_acs)
         shuffle_idx = np.random.permutation(len(states_np))
@@ -78,22 +78,20 @@ if __name__ == "__main__":
         epochs = 10000
         val_losses, loss_mean_pred = bc.train(states, actions, epochs)
 
-        plt.plot(np.arange(1, len(loss_mean_pred) + 1), loss_mean_pred, label="ensemble prediction validation loss")
-        plt.plot(np.arange(1, len(loss_mean_pred)  + 1), np.array(val_losses).mean(axis=0), label="mean validation loss")
-        plt.legend()    
-        plt.savefig(os.path.join(logdir, "train_bc.png"))
-        plt.close()
-
+        n_trajs = 10
+        states1, acs1, states2, acs2, bc_labels = [], [], [], [], []
+        trajectories = [[] for _ in range(params["cost_model"]["offline_demos"]))]
+        costs = [[] for _ in range(len(demo_trajs))]
         bc_trajs = []
-        eps = np.linspace(0, 0.75, num=4)
-
-        if params["cost_model"]["bc_comp_mode"] == "all":
-            start = env.reset()
-            costs = [[] for _ in range(len(eps))]
-            for i, e in enumerate(eps):
-                bc_trajs.append([])
-                for k in range(5):
-                    states, acs = [], []
+        # Collect BC rollouts from the starting state of each demonstration at every noice level
+        for traj_i in range(len(demo_trajs)):
+            start = demo_trajs[traj_i][0][0]
+            for i, e, in enumerate(eps):
+                trajectories[traj_i].append([])
+                costs[traj_i].append([])
+                for n in range(n_trajs):
+                    states = []
+                    acs = []
                     s = start
                     traj = []
                     for t in range(env.horizon):
@@ -107,132 +105,17 @@ if __name__ == "__main__":
                         next_s = dynamics(torch.unsqueeze(torch.cat((state_torch, a)), dim=0))
                         s = next_s.detach().cpu().squeeze().numpy()
                     traj = [np.array(states), np.array(acs)]
-                    bc_trajs[-1].append(traj)
-                    costs[i].append(env.get_expert_cost([traj[0][-1]])[0])
-
-            costs = np.array(costs)
-            avg_costs = np.mean(costs, axis=1)
-            std_costs = np.std(costs, axis=1)
-            plt.figure()
-            plt.errorbar(eps, avg_costs, yerr=std_costs)
-            plt.xlabel("epsilon greedy")
-            plt.ylabel("cost at final state")
-            plt.savefig(os.path.join(logdir, "degredation.png"))
-            plt.close()
-
-            background = cv2.resize(env._get_obs(images=True), (100, 100))
-            plt.figure()
-            plt.imshow(background, extent=[0, 100, 100, 0])
-            plt.plot(demo_trajs[0][0][:, 0] * 100 / 0.6 + 50, demo_trajs[0][0][:, 1]  * 100 / 0.6 + 50, label="Demo")
-            for i, traj_level in enumerate(bc_trajs):
-                plt.plot(traj_level[0][0][:, 0] * 100 / 0.6 + 50, traj_level[0][0][:, 1]  * 100 / 0.6 + 50, label="epsilon = " + str(eps[i]))
-            plt.legend()
-            plt.savefig(os.path.join(logdir, "demos.png"))
-            plt.close()
-            states1 = []
-            acs1 = []
-            states2 = []
-            acs2 = []
-            bc_labels = []
-            
-            for traj_set_1, traj_set_2 in combinations([demo_trajs] + bc_trajs, 2):
+                    trajectories[traj_i][i].append(traj)
+                    costs[traj_i][i].append(env.get_expert_cost([traj[0][-1]])[0])
+            for traj_set_1, traj_set_2 in combinations([demo_trajs[traj_i]] + trajectories[traj_i], 2):
                 for traj1, traj2 in product(traj_set_1, traj_set_2):
                     states1.append(np.array(traj1)[0, :])
                     acs1.append(np.array(traj1)[1, :])
                     states2.append(np.array(traj2)[0, :])
-                    acs2.append(np.array(traj2)[1, :])
+                    acs2.append(np.array(traj2)[0, :])
                     bc_labels.append(0)
-        elif params["cost_model"]["bc_comp_mode"] == "same" or params["cost_model"]["bc_comp_mode"] == "other":
-            n_trajs = 10
-            states1, acs1, states2, acs2, bc_labels = [], [], [], [], []
-            trajectories = [[] for _ in range(len(demo_trajs))]
-            costs = [[] for _ in range(len(demo_trajs))]
-            bc_trajs = []
-            for traj_i in range(len(demo_trajs)):
-                start = demo_trajs[traj_i][0][0]
-                for i, e, in enumerate(eps):
-                    trajectories[traj_i].append([])
-                    costs[traj_i].append([])
-                    for n in range(n_trajs):
-                        states = []
-                        acs = []
-                        s = start
-                        traj = []
-                        for t in range(env.horizon):
-                            states.append(s) 
-                            state_torch = torch.from_numpy(s).float().to(device)
-                            if np.random.random() < e:
-                                a = torch.from_numpy(env.action_space.sample()).float().to(device)
-                            else:
-                                a = bc.predict(state_torch).squeeze()
-                            acs.append(a.detach().cpu().squeeze().numpy())
-                            next_s = dynamics(torch.unsqueeze(torch.cat((state_torch, a)), dim=0))
-                            s = next_s.detach().cpu().squeeze().numpy()
-                        traj = [np.array(states), np.array(acs)]
-                        trajectories[traj_i][i].append(traj)
-                        costs[traj_i][i].append(env.get_expert_cost([traj[0][-1]])[0])
-                for traj_set_1, traj_set_2 in combinations([demo_trajs[traj_i]] + trajectories[traj_i], 2):
-                    for traj1, traj2 in product(traj_set_1, traj_set_2):
-                        states1.append(np.array(traj1)[0, :])
-                        acs1.append(np.array(traj1)[1, :])
-                        states2.append(np.array(traj2)[0, :])
-                        acs2.append(np.array(traj2)[0, :])
-                        bc_labels.append(0)
-            if params["cost_model"]["bc_comp_mode"] != "other":
-                costs = np.array(costs)
-                avg_costs = np.mean(costs, axis=-1)
-                std_costs = np.std(costs, axis=-1)
-                plt.figure()
-                for i, cost_from_start in enumerate(avg_costs):
-                    plt.errorbar(eps, cost_from_start, yerr=std_costs[i])
-                plt.xlabel("epsilon greedy")
-                plt.ylabel("cost at final state")
-                plt.savefig(os.path.join(logdir, "degredation.png"))
-                plt.close()
-                background = cv2.resize(env._get_obs(images=True), (100, 100))
-                plt.figure()
-                plt.imshow(background, extent=[0, 100, 100, 0])
-                plt.plot(demo_trajs[0][0][:, 0] * 100 / 0.6 + 50, demo_trajs[0][0][:, 1]  * 100 / 0.6 + 50, label="Demo")
-                for i, traj_level in enumerate(trajectories[0]):
-                    plt.plot(traj_level[0][0][:, 0] * 100 / 0.6 + 50, traj_level[0][0][:, 1]  * 100 / 0.6 + 50, label="epsilon = " + str(eps[i]))
-                plt.legend()
-                plt.savefig(os.path.join(logdir, "demos.png"))
-                plt.close()
-        if params["cost_model"]["bc_comp_mode"] == "other":
-            old_costs = costs
-            costs = costs = [[] for _ in range(len(demo_trajs))]
-            for traj_i in range(len(demo_trajs)):
-                start = env.reset()
-                for i, e, in enumerate(eps):
-                    trajectories[traj_i].append([])
-                    costs[traj_i].append([])
-                    for n in range(n_trajs):
-                        states = []
-                        acs = []
-                        s = start
-                        traj = []
-                        for t in range(env.horizon):
-                            states.append(s) 
-                            state_torch = torch.from_numpy(s).float().to(device)
-                            if np.random.random() < e:
-                                a = torch.from_numpy(env.action_space.sample()).float().to(device)
-                            else:
-                                a = bc.predict(state_torch).squeeze()
-                            acs.append(a.detach().cpu().squeeze().numpy())
-                            next_s = dynamics(torch.unsqueeze(torch.cat((state_torch, a)), dim=0))
-                            s = next_s.detach().cpu().squeeze().numpy()
-                        traj = [np.array(states), np.array(acs)]
-                        trajectories[traj_i][i].append(traj)
-                        costs[traj_i][i].append(env.get_expert_cost([traj[0][-1]])[0])
-                for traj_set_1, traj_set_2 in combinations(trajectories[traj_i], 2):
-                    for traj1, traj2 in product(traj_set_1, traj_set_2):
-                        states1.append(np.array(traj1)[0, :])
-                        acs1.append(np.array(traj1)[1, :])
-                        states2.append(np.array(traj2)[0, :])
-                        acs2.append(np.array(traj2)[0, :])
-                        bc_labels.append(0)
-                    
-        cost_model.train(states1, states2, bc_labels, params["cost_model"]["pretrain_epochs"])
+            costs = np.array(costs)           
+        cost_model.train(np.concatenate([states1, acs1], axis=1), np.concatenate([states2, acs2], axis=1), bc_labels, params["cost_model"]["pretrain_epochs"])
         
         env.visualize_rewards(os.path.join(logdir, "cost_init.png"), cost_model)
         paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [], [], [], [], []
@@ -240,13 +123,6 @@ if __name__ == "__main__":
         paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [demo_trajs[0][0]], [demo_trajs[0][1]], [demo_trajs[1][0]], [demo_trajs[1][1]], [int(np.sum(env.get_expert_cost(demo_trajs[0][0])) > np.sum(env.get_expert_cost(demo_trajs[1][0])))]
         cost_model.train(np.concatenate([paired_states1, paired_actions1], axis=1), np.concatenate([paired_states2, paired_actions2], axis=1), labels, params["cost_model"]["pretrain_epochs"])
         env.visualize_rewards(os.path.join(logdir, "cost_init.png"), cost_model)
-
-        background = cv2.resize(env._get_obs(images=True), (100, 100))
-        plt.figure()
-        plt.imshow(background, extent=[0, 100, 100, 0])
-        for demo in demo_trajs:
-            plt.plot(demo[0][:, 0] * 100 / 0.6 + 50, demo[0][:, 1]  * 100 / 0.6 + 50)
-        plt.savefig(os.path.join(logdir, "demos.png"))
     else:
         paired_states1, paired_actions1, paired_states2, paired_actions2, labels = [], [], [], [], []
     
@@ -325,7 +201,7 @@ if __name__ == "__main__":
             agent_model.rnd_weight = 0
             true_eval_costs = []
             learned_eval_costs = []
-            for i in range(50):
+            for i in range(10):
                 done = False
                 state = env.reset()
                 true_cost = 0

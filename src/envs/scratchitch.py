@@ -16,7 +16,7 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
             reward_distance = -np.linalg.norm(state[::-1])
             reward_action = - np.linalg.norm(action)
             reward_force_scratch = 0
-            if False and i > 0 and np.linalg.norm(state[::-1]) < 0.025 and np.linalg.norm(state[::-1] - states[i - 1][::-1]) > 0.01 and state[-1] < 10:
+            if i > 0 and np.linalg.norm(state[::-1]) < 0.025 and np.linalg.norm(state[::-1] - states[i - 1][::-1]) > 0.01 and state[-1] < 10:
                 reward_force_scratch = 5
             reward = self.config('distance_weight') * reward_distance + self.config('action_weight') * reward_action + self.config('scratch_reward_weight')*reward_force_scratch
             costs.append(reward)
@@ -33,6 +33,9 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
         obs = np.concatenate((obs[7:10], handpicked_features))
         return obs
 
+    def reset(self):
+        np.random.seed(0)
+        return super().reset()
     # def step(self, action):
     #     obs, reward, done, info = super().step(action)
     #
