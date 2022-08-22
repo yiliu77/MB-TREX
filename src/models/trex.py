@@ -57,9 +57,7 @@ class TRexCost:
         self.human = human
         self.params = params
 
-        self.input_dim = state_dim if params["state_only"] else state_dim + action_dim
-        self.preprocess = (lambda s, a: s) if params["state_only"] else (lambda s, a: torch.cat((s, a), dim=-1))
-
+        self.input_dim = (state_dim if params["state_only"] else state_dim + action_dim) * params["cost_steps"]
         self.cost_models = [CostNetwork(self.input_dim, params["hidden_dim"]).to(device=self.device) for _ in
                             range(params["ensemble_size"])]
         self.opts = [Adam(self.cost_models[i].parameters(), lr=params["lr"]) for i in range(len(self.cost_models))]
@@ -107,15 +105,13 @@ class TRexCost:
 
     def get_value(self, states, actions=None):
         if not torch.is_tensor(states):
-            states = torch.from_numpy(states).float().to(self.device)
+            states = torch.from_numpy(states).float()
         states = states.to(self.device)
         if actions is not None:
             if not torch.is_tensor(actions):
                 actions = torch.from_numpy(actions).float()
             actions = actions.to(self.device)
-            inputs = self.preprocess(states, actions) # for compatibility
-        else:
-            inputs = states
+        inputs = self.preprocess_torch(states, actions)
         with torch.no_grad():
             costs = torch.mean(torch.cat([self.cost_models[i].get_cost(inputs)[0].unsqueeze(1)
                                           for i in range(len(self.cost_models))], dim=1), dim=1)
@@ -145,11 +141,7 @@ class TRexCost:
 
 
     def gen_queries(self, all_states, all_actions):
-        if self.params["state_only"]:
-            trajectories = all_states
-        else:
-            trajectories = np.concatenate([all_states, all_actions], axis=-1)
-
+        trajectories = self.preprocess(all_states, all_actions)
         num_queries = self.params["query_batch_size"]
         if self.params["query_technique"] == "random":
             pair_indices = np.array(list(combinations(np.arange(len(trajectories)), 2))).squeeze()
@@ -187,6 +179,26 @@ class TRexCost:
                 pref_states2 = np.concatenate([pref_states2, query2[np.newaxis, :]], axis=0)
                 pref_labels = np.concatenate([pref_labels, np.array([label])], axis=0)
         return pref_states1, pref_states2, pref_labels
+
+    def preprocess(self, all_states, all_actions):
+        if self.params["state_only"]:
+            trajectories = all_states
+        else:
+            trajectories = np.concatenate([all_states, all_actions], axis=-1)
+        d = trajectories.shape[1]
+        t = self.params["cost_steps"]
+        trajectories = np.concatenate([trajectories[:, i:d-t+1+i, :] for i in range(t)], axis=-1)
+        return trajectories
+
+    def preprocess_torch(self, all_states, all_actions):
+        if self.params["state_only"]:
+            trajectories = all_states
+        else:
+            trajectories = torch.cat([all_states, all_actions], dim=-1)
+        d = trajectories.shape[1]
+        t = self.params["cost_steps"]
+        trajectories = torch.cat([trajectories[:, i:d-t+1+i, :] for i in range(t)], dim=-1)
+        return trajectories
 
 
 class GTCost:

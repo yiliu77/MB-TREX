@@ -6,7 +6,8 @@ env:
   max_force: 2
   goal_thresh: 0.0
   dims: [100, 100]
-  state_dim: 4
+  # state_dim: 4
+  state_dim: 11
   action_dim: 7
 
 human:
@@ -22,9 +23,9 @@ dynamics_model:
   train_test_split: 0.9
   num_cores: 10
   online_update_freq: 10000
-  use_cached: True
-  save_obs: "obs_red"
-  save_acs: "acs_red"
+  use_cached: False
+  save_obs: "obs_big"
+  save_acs: "acs_big"
 mpc:
   cem_iters: 5
   cem_pop_size: 200
@@ -47,4 +48,6 @@ cost_model:
   query_technique: "infogain"
   num_generated_pairs: 10
   ensemble_size: 3
+  cost_steps: 2
+  drex_pretrain: False
 

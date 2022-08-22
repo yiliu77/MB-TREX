@@ -47,7 +47,7 @@ if __name__ == "__main__":
     if transition_params["gt_dynamics"]:
         dynamics = partial(predict_gt_dynamics, tmp_env, 2)
     else:
-        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], "model_sac.pth")).to(device)
+        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], "model_big.pth")).to(device)
         # rnd.update_stats_from_states(torch.from_numpy(transitions[np.random.permutation(np.arange(transitions.shape[0]))[:100]][:, 0]).to(device))
 
     if params["cost_model"]["gt_cost"]:
@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
         n_trajs = 10
         states1, acs1, states2, acs2, bc_labels = [], [], [], [], []
-        trajectories = [[] for _ in range(params["cost_model"]["offline_demos"]))]
+        trajectories = [[] for _ in range(params["cost_model"]["offline_demos"])]
         costs = [[] for _ in range(len(demo_trajs))]
         bc_trajs = []
         # Collect BC rollouts from the starting state of each demonstration at every noice level
@@ -146,7 +146,6 @@ if __name__ == "__main__":
             action, generated_actions, generated_states = agent_model.act(state)
             next_state, reward, done, info = env.step(action)
             episode_reward += reward
-            learned_cost += cost_model.get_value(state.reshape(1, 1, -1), action.reshape(1,1, -1)).cpu().numpy().item()
             cem_actions.append(generated_actions)
             cem_states.append(generated_states)
             all_states.append(state)
@@ -156,6 +155,7 @@ if __name__ == "__main__":
             if plot:
                 frames.append(env._get_obs(use_images=True))
             t += 1
+        learned_cost = cost_model.get_value(np.expand_dims(all_states, axis=0), np.expand_dims(all_actions, axis=0)).cpu().numpy().sum()
         true_costs.append(-episode_reward)
         if "success" in info:
             num_success += int(info["success"])
@@ -191,8 +191,8 @@ if __name__ == "__main__":
 
         #dynamics update
         if iteration % transition_params["online_update_freq"] == 0:
-            data = np.array([all_states[:-1], all_actions[:-1], all_states[1:]]).transpose(1, 0, 2)
-            dynamics.train_dynamics(data, 1, update_stats=False)
+            dynamics.train_dynamics(all_states, all_actions, 1, update_stats=False)
+        
         # rnd update
         rnd.train(torch.tensor(np.array(all_states)).to(device).float())
         if iteration % 10 == 0:

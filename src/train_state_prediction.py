@@ -59,18 +59,18 @@ if __name__ == '__main__':
 
     print("Beginning training model...")
     dynamics = PtModel(params["env"]["state_dim"], params["env"]["action_dim"], lr=transition_params["lr"]).to(device)
-    # val_loss = dynamics.train_dynamics(np.concatenate((observations[:, 7:10], observations[:, -1:]), axis=1), actions, transition_params["epochs"],
+    # val_loss = dynamics.train_dynamics(np.concatenate([observations[:, :7], observations[:, 10:13], observations[:, -1:]], axis=1), actions, transition_params["epochs"],
     #                                    val_split=transition_params["train_test_split"])
     val_loss = dynamics.train_dynamics(observations[:100000], actions[:100000],
                                        transition_params["epochs"],
                                        val_split=transition_params["train_test_split"])
 
-    torch.save(dynamics, os.path.join(logdir, "model.pth"))
+    torch.save(dynamics, os.path.join(logdir, "model_big.pth"))
 
     plt.figure()
     plt.plot(val_loss)
     plt.xlabel("epoch")
     plt.ylabel("Val loss")
     plt.title("Dynamics training")
-    plt.savefig(os.path.join(logdir, "training.png"))
+    plt.savefig(os.path.join(logdir, "training_big.png"))
     plt.close()

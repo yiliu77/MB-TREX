@@ -41,6 +41,7 @@ cost_model:
   query_technique: "infogain"
   batch_size: 10
   num_generated_pairs: 45
+  cost_steps: 2
 
 mpc:
   cem_iters: 5
