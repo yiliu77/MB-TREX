@@ -12,7 +12,7 @@ env:
 human:
   type: "hopper_human"
   same_margin: 0.005
-  actual_human: True
+  actual_human: False
 
 dynamics_model:
   num_dynamics_iters: 200000
@@ -24,6 +24,7 @@ dynamics_model:
   num_cores: 10
   online_update_freq: 10000
   use_cached: True
+  model_file: "model.pth"
 mpc:
   cem_iters: 5
   cem_pop_size: 200
@@ -35,7 +36,7 @@ cost_model:
   state_only: False
   use_images: False
   offline_demos: 0
-  bc_warm_start: False
+  drex_pretrain: False
   episodes: 100
   regularization: 0.2
   hidden_dim: 512
@@ -45,5 +46,6 @@ cost_model:
   batch_size: 10
   query_technique: "infogain"
   num_generated_pairs: 20
+  cost_steps: 1
 
 

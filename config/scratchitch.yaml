@@ -7,7 +7,7 @@ env:
   goal_thresh: 0.0
   dims: [100, 100]
   # state_dim: 4
-  state_dim: 11
+  state_dim: 7
   action_dim: 7
 
 human:
@@ -17,15 +17,16 @@ human:
 dynamics_model:
   num_dynamics_iters: 200000
   gt_dynamics: False
-  epochs: 100
-  batch_size: 32
-  lr: 0.0002
+  epochs: 50
+  batch_size: 64
+  lr: 0.002
   train_test_split: 0.9
   num_cores: 10
   online_update_freq: 10000
   use_cached: False
-  save_obs: "obs_big"
-  save_acs: "acs_big"
+  save_obs: "obs_small"
+  save_acs: "acs_small"
+  model_file: "model_small"
 mpc:
   cem_iters: 5
   cem_pop_size: 200
@@ -34,12 +35,12 @@ mpc:
   rnd_weight: 0.0
   keep_gen_traj: 5
 cost_model:
-  gt_cost: False
+  gt_cost: True
   state_only: False
   use_images: False
   offline_demos: 0
   bc_warm_start: False
-  episodes: 100
+  episodes: 10
   regularization: 0.1
   hidden_dim: 512
   lr: 0.0002
@@ -48,6 +49,6 @@ cost_model:
   query_technique: "infogain"
   num_generated_pairs: 10
   ensemble_size: 3
-  cost_steps: 2
+  cost_steps: 1
   drex_pretrain: False
 

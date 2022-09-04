@@ -206,10 +206,16 @@ class GTCost:
         self.env = env
 
     def get_value(self, states, actions):
-        device = states.device
-        states = states.detach().cpu().numpy()
-        actions = actions.detach().cpu().numpy()
-        return torch.from_numpy(self.env.get_expert_cost(states, actions)).to(device)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if torch.is_tensor(states):
+            device = states.device
+            states = states.detach().cpu().numpy()
+        if torch.is_tensor(actions):
+            actions = actions.detach().cpu().numpy()
+        costs = []
+        for states_traj, acs_traj in zip(states, actions):
+            costs.append(self.env.get_expert_cost(states_traj, acs_traj))
+        return torch.from_numpy(np.array(costs)).to(device).sum(dim=1)
     
     def train(self, *args):
         pass

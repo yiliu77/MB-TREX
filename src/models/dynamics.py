@@ -18,7 +18,7 @@ class PtModel(nn.Module):
         out_features = state_size
         self.in_features = in_features
         self.out_features = out_features
-        hidden_size = 256
+        hidden_size = 512
         self.normalize = True
 
         self.fc0 = nn.Linear(in_features, hidden_size)
@@ -35,11 +35,11 @@ class PtModel(nn.Module):
 
         self.fc3 = nn.Linear(hidden_size, out_features)
 
-        # self.fc4 = nn.Linear(hidden_size, hidden_size)
+        self.fc4 = nn.Linear(hidden_size, hidden_size)
 
-        # self.fc5 = nn.Linear(hidden_size, hidden_size)
-        #
-        # self.fc6 = nn.Linear(hidden_size, out_features)
+        self.fc5 = nn.Linear(hidden_size, hidden_size)
+        
+        self.fc6 = nn.Linear(hidden_size, out_features)
         # nn.init.trunc_normal_(self.fc3.weight, std=1.0 / (2.0 * np.sqrt(200)))
         # nn.init.constant_(self.fc3.bias, 0)
 
@@ -101,10 +101,10 @@ class PtModel(nn.Module):
         x = swish(self.fc0(x))
         x = swish(self.fc1(x))
         x = swish(self.fc2(x))
-        x = self.fc3(x)
+        # x = swish(self.fc3(x))
         # x = swish(self.fc4(x))
         # x = swish(self.fc5(x))
-        # x = self.fc6(x)
+        x = self.fc3(x)
 
         return x * self.outputs_sigma + self.outputs_mu + inputs[:, :self.state_dim]
 

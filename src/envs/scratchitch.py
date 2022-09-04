@@ -9,15 +9,19 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
         self.horizon=200
         self.setup_camera()
 
-    def get_expert_reward(self, state, action):
-        reward_distance = -np.linalg.norm(state[:3], state[10:13])
-        reward_action = - np.linalg.norm(action)
-        reward_force_scratch = 0
-        if -reward_distance < 0.025 and np.linalg.norm(state[:3] - self._prev_target_contact_pos) > 0.01 and state[-1] < 10:
-            reward_force_scratch = 5
-            self._prev_target_contact_pos = state[:3]
-        reward = self.config('distance_weight') * reward_distance + self.config('action_weight') * reward_action + self.config('scratch_reward_weight')*reward_force_scratch
-        return reward
+    def get_expert_cost(self, states, actions):
+        prev_target_contact_pos = np.zeros(3)
+        costs = []
+        for state, action in zip(states, actions):
+            reward_distance = -np.linalg.norm(state[:3] - state[3:6])
+            reward_action = - np.linalg.norm(action)
+            reward_force_scratch = 0
+            if -reward_distance < 0.025 and np.linalg.norm(state[:3] - prev_target_contact_pos) > 0.01 and state[-1] < 10:
+                reward_force_scratch = 5
+                prev_target_contact_pos = state[:3]
+            reward = self.config('distance_weight') * reward_distance + self.config('action_weight') * reward_action + self.config('scratch_reward_weight')*reward_force_scratch
+            costs.append(-reward)
+        return np.array(costs)
 
     def _get_obs(self, use_images=False):
         if use_images:
@@ -27,22 +31,21 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
             return img
         obs = super()._get_obs()
         # handpicked_features = np.array([self.tool_force_at_target])
-        # obs = np.concatenate([obs[:7], obs[10:13], obs[-1:]])
+        obs = np.concatenate([obs[:3], obs[10:13], obs[-1:]])
         # obs = np.concatenate((obs[7:10], handpicked_features))
         return obs
 
     def reset(self):
         np.random.seed(0)
-        self._prev_target_contact_pos = np.zeros(3)
         return super().reset()
 
     def step(self, action):
         obs, reward, done, info = super().step(action)
     
         # distance = np.linalg.norm(obs[7:10])
-        tool_force_at_target = info['tool_force_at_target']
-        handpicked_features = np.array([tool_force_at_target])
-        obs = np.concatenate((obs, handpicked_features))
+        # tool_force_at_target = info['tool_force_at_target']
+        # handpicked_features = np.array([tool_force_at_target])
+        # obs = np.concatenate((obs, handpicked_features))
     
         return obs, reward, done, info
 

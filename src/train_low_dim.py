@@ -47,7 +47,7 @@ if __name__ == "__main__":
     if transition_params["gt_dynamics"]:
         dynamics = partial(predict_gt_dynamics, tmp_env, 2)
     else:
-        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], "model_big.pth")).to(device)
+        dynamics = torch.load(os.path.join("saved/models/state", params["env"]["type"], transition_params["model_file"])).to(device)
         # rnd.update_stats_from_states(torch.from_numpy(transitions[np.random.permutation(np.arange(transitions.shape[0]))[:100]][:, 0]).to(device))
 
     if params["cost_model"]["gt_cost"]:

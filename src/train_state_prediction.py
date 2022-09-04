@@ -65,12 +65,12 @@ if __name__ == '__main__':
                                        transition_params["epochs"],
                                        val_split=transition_params["train_test_split"])
 
-    torch.save(dynamics, os.path.join(logdir, "model_big.pth"))
+    torch.save(dynamics, os.path.join(logdir, transition_params["model_file"]))
 
     plt.figure()
     plt.plot(val_loss)
     plt.xlabel("epoch")
     plt.ylabel("Val loss")
     plt.title("Dynamics training")
-    plt.savefig(os.path.join(logdir, "training_big.png"))
+    plt.savefig(os.path.join(logdir, "{}.png".format(os.path.splitext(transition_params["model_file"])[0])))
     plt.close()
