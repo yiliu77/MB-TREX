@@ -10,15 +10,15 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
         self.setup_camera()
 
     def get_expert_cost(self, states, actions):
-        prev_target_contact_pos = np.zeros(3)
+        # prev_target_contact_pos = np.zeros(3)
         costs = []
         for state, action in zip(states, actions):
             reward_distance = -np.linalg.norm(state[:3] - state[3:6])
             reward_action = - np.linalg.norm(action)
             reward_force_scratch = 0
-            if -reward_distance < 0.025 and np.linalg.norm(state[:3] - prev_target_contact_pos) > 0.01 and state[-1] < 10:
+            if -reward_distance < 0.025 and state[-1] < 10: # np.linalg.norm(state[:3] - prev_target_contact_pos) > 0.01 and state[-1] < 10:
                 reward_force_scratch = 5
-                prev_target_contact_pos = state[:3]
+                # prev_target_contact_pos = state[:3]
             reward = self.config('distance_weight') * reward_distance + self.config('action_weight') * reward_action + self.config('scratch_reward_weight')*reward_force_scratch
             costs.append(-reward)
         return np.array(costs)
