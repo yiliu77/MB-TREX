@@ -13,7 +13,7 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
         # prev_target_contact_pos = np.zeros(3)
         costs = []
         for state, action in zip(states, actions):
-            reward_distance = -np.linalg.norm(state[:3] - state[3:6])
+            reward_distance = -np.linalg.norm(state[:3])
             reward_action = - np.linalg.norm(action)
             reward_force_scratch = 0
             if -reward_distance < 0.025 and state[-1] < 10: # np.linalg.norm(state[:3] - prev_target_contact_pos) > 0.01 and state[-1] < 10:
@@ -31,8 +31,8 @@ class ScratchItchPR2EnvMB(ScratchItchPR2Env):
             return img
         obs = super()._get_obs()
         # handpicked_features = np.array([self.tool_force_at_target])
-        obs = np.concatenate([obs[:3], obs[10:13], obs[-1:]])
-        # obs = np.concatenate((obs[7:10], handpicked_features))
+        # obs = np.concatenate([obs[:3], obs[10:13], obs[-1:]])
+        obs = np.concatenate((obs[7:10], handpicked_features))
         return obs
 
     def reset(self):

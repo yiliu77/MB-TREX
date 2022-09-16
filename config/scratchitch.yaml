@@ -6,8 +6,8 @@ env:
   max_force: 2
   goal_thresh: 0.0
   dims: [100, 100]
-  # state_dim: 4
-  state_dim: 7
+  state_dim: 4
+  # state_dim: 7
   action_dim: 7
 
 human:
